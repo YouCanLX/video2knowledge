@@ -33,6 +33,8 @@ def test_render_outputs_include_timeline_and_enrichment():
     markdown = render_markdown(doc)
     lyrics = render_lrc(doc.segments, doc.video.title, doc.video.author)
     assert "## Core Summary" in markdown
+    assert "background-color:#fff7d6;color:#4a3b00" in markdown
+    assert "border-left:5px solid #d9a900" in markdown
     assert "`00:00:01.250`" in markdown
     assert "[01:04.00]Second sentence" in lyrics
 

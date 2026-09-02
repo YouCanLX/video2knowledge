@@ -51,17 +51,35 @@ def render_markdown(document: KnowledgeDocument) -> str:
     if tags:
         parts += [f"Tags: {tags}", ""]
     sections = [
-        ("Core Summary", document.enrichment.summary, "#fff4cc"),
-        ("Further Insights", document.enrichment.insights, "#e8f4ff"),
-        ("Actionable Suggestions", document.enrichment.suggestions, "#eaf8ef"),
-        ("Questions to Explore", document.enrichment.questions, "#f8eafa"),
+        ("Core Summary", document.enrichment.summary, "#fff7d6", "#4a3b00", "#d9a900"),
+        ("Further Insights", document.enrichment.insights, "#eaf4ff", "#173a5e", "#4b8ccb"),
+        (
+            "Actionable Suggestions",
+            document.enrichment.suggestions,
+            "#eaf8f0",
+            "#174a2d",
+            "#45a36a",
+        ),
+        (
+            "Questions to Explore",
+            document.enrichment.questions,
+            "#f7ecfa",
+            "#52245d",
+            "#a45ab3",
+        ),
     ]
-    for heading, values, color in sections:
+    for heading, values, background, foreground, accent in sections:
         if values:
+            card_style = (
+                f"background-color:{background};color:{foreground};"
+                f"border:1px solid {accent};border-left:5px solid {accent};"
+                "padding:14px 18px;border-radius:10px;line-height:1.75;"
+                "box-shadow:0 2px 8px rgba(0,0,0,0.10)"
+            )
             parts += [
                 f"## {heading}",
                 "",
-                f'<div style="background:{color};padding:12px;border-radius:8px">',
+                f'<div style="{card_style}">',
             ]
             parts.extend(f"- {value}" for value in values)
             parts += ["</div>", ""]
