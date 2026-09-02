@@ -3,6 +3,7 @@ import asyncio
 import httpx
 import pytest
 
+import video2knowledge.web as web_module
 from video2knowledge.config import Settings
 from video2knowledge.models import JobStatus, VideoItem
 from video2knowledge.urls import extract_bilibili_bvid
@@ -44,6 +45,10 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="force-refresh"' in page.text
     assert stylesheet.status_code == 200
     assert script.status_code == 200
+    assert "Open File" in script.text
+    assert "Show in Finder" in script.text
+    assert 'addEventListener("mouseenter", expand)' in script.text
+    assert 'fileList.matches(":hover")' in script.text
 
 
 def test_runtime_settings_are_exposed_and_persisted(tmp_path):
@@ -170,3 +175,35 @@ def test_active_job_cannot_be_deleted(tmp_path):
     response = asyncio.run(scenario())
 
     assert response.status_code == 409
+
+
+def test_completed_job_output_can_be_opened_or_revealed(tmp_path, monkeypatch):
+    actions = []
+
+    async def fake_open(path, reveal):
+        actions.append((path, reveal))
+
+    monkeypatch.setattr(web_module, "_open_local_path", fake_open)
+
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        repo = app.state.services.repository
+        item = VideoItem("bilibili", "BV1OPEN", "Open", "https://example.test")
+        output = tmp_path / "library" / "Open_BV1OPEN.md"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("content", encoding="utf-8")
+        job_id = repo.create_job(item)
+        repo.update_job(job_id, JobStatus.COMPLETE, 1, outputs={"markdown": str(output)})
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            opened = await client.post(f"/api/jobs/{job_id}/outputs/markdown/open")
+            revealed = await client.post(f"/api/jobs/{job_id}/outputs/markdown/reveal")
+            missing = await client.post(f"/api/jobs/{job_id}/outputs/audio/open")
+        return opened, revealed, missing, output
+
+    opened, revealed, missing, output = asyncio.run(scenario())
+
+    assert opened.status_code == 200
+    assert revealed.status_code == 200
+    assert missing.status_code == 404
+    assert actions == [(output, False), (output, True)]

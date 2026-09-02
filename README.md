@@ -121,7 +121,9 @@ selects the summary backend (Codex CLI by default), and starts, monitors, or sto
 MLX Audio service.
 Completed queue entries show their generated and source-media paths. Terminal jobs can be
 removed from the queue while keeping local files, or removed together with their associated
-local files after an explicit confirmation.
+local files after an explicit confirmation. Each generated file can also be opened with its
+default macOS application or revealed directly in Finder. File controls expand on hover and
+collapse only after the pointer and keyboard focus have left their current file section.
 
 Process a URL from the command line:
 

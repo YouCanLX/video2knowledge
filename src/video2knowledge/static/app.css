@@ -154,10 +154,38 @@ main {
 .bar i { display: block; height: 100%; background: var(--lime); }
 .job small, .empty { color: var(--muted); }
 .queue-status { min-height: 22px; color: var(--muted); font-size: 13px; }
-.job-files { display: grid; gap: 6px; margin-top: 10px; }
-.job-files div { display: grid; gap: 2px; }
-.job-files span { color: var(--muted); font-size: 11px; text-transform: capitalize; }
+.job-files {
+  margin-top: 10px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.job-files > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.job-files > summary small { color: var(--muted); font-weight: 400; }
+.job-files[open] > summary { margin-bottom: 7px; }
+.job-file-list { display: grid; gap: 6px; }
+.job-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  padding: 7px;
+  border-radius: 8px;
+  background: #f6f7f2;
+}
+.job-file-info { display: grid; gap: 2px; min-width: 0; }
+.job-file-info span { color: var(--muted); font-size: 11px; text-transform: capitalize; }
 .job-files code { overflow-wrap: anywhere; font-size: 11px; }
+.job-file-actions { display: flex; gap: 5px; }
+.job-file-actions button { padding: 5px 7px; white-space: nowrap; font-size: 10px; }
 .job-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .job-actions button { padding: 6px 9px; font-size: 11px; }
 .empty { padding: 30px 0; text-align: center; }
@@ -269,4 +297,7 @@ pre {
   .site-header { align-items: start; flex-direction: column; }
   .settings-grid { grid-template-columns: 1fr; }
   .wide-field { grid-column: auto; }
+  .job-file { grid-template-columns: 1fr; }
+  .job-file-actions { flex-wrap: wrap; }
+  .job-files > summary { align-items: start; flex-direction: column; }
 }

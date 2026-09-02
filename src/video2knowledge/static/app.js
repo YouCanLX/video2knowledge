@@ -5,6 +5,7 @@ const queueStatus = select("#queue-status");
 const urlStatus = select("#url-status");
 const settingsStatus = select("#settings-status");
 let searchResults = [];
+const expandedFileJobs = new Set();
 
 function escapeHtml(value) {
   return String(value ?? "").replace(
@@ -159,11 +160,33 @@ async function pollJobs() {
     jobs.innerHTML = data.length ? data.map((job) => {
       const outputEntries = Object.entries(job.outputs || {});
       const outputPaths = job.status === "complete" && outputEntries.length
-        ? `<div class="job-files">
-            ${outputEntries.map(([kind, path]) => `
-              <div><span>${escapeHtml(kind.replaceAll("_", " "))}</span><code>${escapeHtml(path)}</code></div>
-            `).join("")}
-          </div>`
+        ? `<details class="job-files" data-file-list="${escapeHtml(job.id)}"
+            ${expandedFileJobs.has(job.id) ? "open" : ""}>
+            <summary>
+              <span>Files</span>
+              <small>${outputEntries.length} outputs · hover to expand</small>
+            </summary>
+            <div class="job-file-list">
+              ${outputEntries.map(([kind, path]) => `
+              <div class="job-file">
+                <div class="job-file-info">
+                  <span>${escapeHtml(kind.replaceAll("_", " "))}</span>
+                  <code>${escapeHtml(path)}</code>
+                </div>
+                <div class="job-file-actions">
+                  <button type="button" class="secondary" data-output-action="open"
+                    data-output-job="${escapeHtml(job.id)}" data-output-key="${escapeHtml(kind)}">
+                    Open File
+                  </button>
+                  <button type="button" class="secondary" data-output-action="reveal"
+                    data-output-job="${escapeHtml(job.id)}" data-output-key="${escapeHtml(kind)}">
+                    Show in Finder
+                  </button>
+                </div>
+              </div>
+              `).join("")}
+            </div>
+          </details>`
         : "";
       const canDelete = job.status === "complete" || job.status === "failed";
       return `
@@ -190,8 +213,62 @@ async function pollJobs() {
     jobs.querySelectorAll("[data-delete-files]").forEach((button) => {
       button.addEventListener("click", () => deleteJob(button.dataset.deleteFiles, true));
     });
+    jobs.querySelectorAll("[data-output-action]").forEach((button) => {
+      button.addEventListener("click", () => openJobOutput(
+        button.dataset.outputJob,
+        button.dataset.outputKey,
+        button.dataset.outputAction,
+      ));
+    });
+    jobs.querySelectorAll("[data-file-list]").forEach((fileList) => {
+      const jobId = fileList.dataset.fileList;
+      let collapseTimer;
+      const expand = () => {
+        clearTimeout(collapseTimer);
+        fileList.open = true;
+        expandedFileJobs.add(jobId);
+      };
+      const collapseWhenInactive = () => {
+        clearTimeout(collapseTimer);
+        collapseTimer = setTimeout(() => {
+          const pointerInside = fileList.matches(":hover");
+          const focusInside = fileList.contains(document.activeElement);
+          if (!pointerInside && !focusInside) {
+            fileList.open = false;
+            expandedFileJobs.delete(jobId);
+          }
+        }, 450);
+      };
+      fileList.addEventListener("mouseenter", expand);
+      fileList.addEventListener("mouseleave", collapseWhenInactive);
+      fileList.addEventListener("focusin", expand);
+      fileList.addEventListener("focusout", collapseWhenInactive);
+      fileList.addEventListener("toggle", () => {
+        if (fileList.open) {
+          expandedFileJobs.add(jobId);
+        } else {
+          expandedFileJobs.delete(jobId);
+        }
+      });
+      if (fileList.matches(":hover")) expand();
+    });
   } catch (error) {
     jobs.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function openJobOutput(jobId, outputKey, action) {
+  queueStatus.textContent = action === "reveal" ? "Opening Finder…" : "Opening file…";
+  try {
+    const result = await requestJson(
+      `/api/jobs/${encodeURIComponent(jobId)}/outputs/${encodeURIComponent(outputKey)}/${action}`,
+      { method: "POST" },
+    );
+    queueStatus.textContent = action === "reveal"
+      ? `Revealed in Finder: ${result.path}`
+      : `Opened: ${result.path}`;
+  } catch (error) {
+    queueStatus.textContent = error.message;
   }
 }
 

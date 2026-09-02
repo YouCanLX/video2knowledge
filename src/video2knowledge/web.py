@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Literal
@@ -105,6 +106,25 @@ def _delete_job_files(job: dict, media_dir: Path) -> tuple[list[str], list[str]]
     return removed, skipped
 
 
+async def _open_local_path(path: Path, reveal: bool) -> None:
+    opener = shutil.which("open")
+    if not opener:
+        raise RuntimeError("Opening local files requires the macOS 'open' command")
+    arguments = [opener]
+    if reveal:
+        arguments.append("-R")
+    arguments.append(str(path))
+    process = await asyncio.create_subprocess_exec(
+        *arguments,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await process.communicate()
+    if process.returncode:
+        detail = stderr.decode(errors="replace").strip()
+        raise RuntimeError(detail or f"The open command exited with status {process.returncode}")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.load()
     services = build_services(settings)
@@ -180,6 +200,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not job:
             raise HTTPException(404, "Job not found")
         return job
+
+    def output_path(job_id: str, output_key: str) -> Path:
+        job = repository.get_job(job_id)
+        if not job:
+            raise HTTPException(404, "Job not found")
+        if job["status"] != JobStatus.COMPLETE:
+            raise HTTPException(409, "Files can only be opened for completed jobs")
+        value = job["outputs"].get(output_key)
+        if not value:
+            raise HTTPException(404, "Job output not found")
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = (settings.data_dir / path).resolve()
+        if not path.is_file():
+            raise HTTPException(404, f"Local output file does not exist: {path}")
+        return path
+
+    @app.post("/api/jobs/{job_id}/outputs/{output_key}/open")
+    async def open_job_output(job_id: str, output_key: str):
+        path = output_path(job_id, output_key)
+        try:
+            await _open_local_path(path, reveal=False)
+        except RuntimeError as exc:
+            raise HTTPException(500, str(exc)) from exc
+        return {"action": "opened", "path": str(path)}
+
+    @app.post("/api/jobs/{job_id}/outputs/{output_key}/reveal")
+    async def reveal_job_output(job_id: str, output_key: str):
+        path = output_path(job_id, output_key)
+        try:
+            await _open_local_path(path, reveal=True)
+        except RuntimeError as exc:
+            raise HTTPException(500, str(exc)) from exc
+        return {"action": "revealed", "path": str(path)}
 
     @app.delete("/api/jobs/{job_id}")
     async def delete_job(job_id: str, delete_files: bool = False):
