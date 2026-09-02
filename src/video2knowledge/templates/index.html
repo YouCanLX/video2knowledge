@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Video2Knowledge</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div>
+        <h1>Video2Knowledge Agent</h1>
+        <p>Turn Bilibili videos into searchable insights, synchronized text, and listenable knowledge—all locally on your Mac.</p>
+      </div>
+      <button class="secondary" id="login" type="button">QR Login</button>
+    </header>
+
+    <main>
+      <section class="panel" aria-labelledby="add-video-heading">
+        <h2 id="add-video-heading">Add a Bilibili Video</h2>
+        <form class="direct" id="url-form">
+          <label class="sr-only" for="video-url">Bilibili video URL</label>
+          <input
+            id="video-url"
+            type="url"
+            placeholder="Paste a Bilibili video URL"
+            autocomplete="url"
+            required
+          >
+          <button type="submit">Add Video</button>
+        </form>
+
+        <label class="refresh-option">
+          <input type="checkbox" id="force-refresh">
+          Force re-download cached video
+        </label>
+        <div class="direct-status" id="url-status" role="status" aria-live="polite"></div>
+
+        <div class="divider">or search</div>
+        <form class="search" id="search-form">
+          <label class="sr-only" for="search-kind">Search type</label>
+          <select id="search-kind">
+            <option value="videos">Videos</option>
+            <option value="creators">Creators</option>
+          </select>
+          <label class="sr-only" for="search-query">Search query</label>
+          <input id="search-query" placeholder="Enter a title, keyword, or creator" required>
+          <button type="submit">Search</button>
+        </form>
+
+        <div class="filters">
+          <label><input type="checkbox" id="charging-only"> Charging content only</label>
+          <label for="tag-filter">Tag</label>
+          <input id="tag-filter" placeholder="Example: AI">
+        </div>
+        <div id="results"><div class="empty">Search results will appear here</div></div>
+      </section>
+
+      <aside class="panel" aria-labelledby="queue-heading">
+        <h2 id="queue-heading">Serial Processing Queue</h2>
+        <div class="queue-status" id="queue-status" role="status" aria-live="polite"></div>
+        <div id="jobs"><div class="empty">No jobs yet</div></div>
+      </aside>
+
+      <section class="panel settings-panel" aria-labelledby="settings-heading">
+        <div class="settings-heading">
+          <div>
+            <h2 id="settings-heading">Runtime Settings</h2>
+            <p>Changes are saved to the active data directory configuration.</p>
+          </div>
+          <span class="service-badge stopped" id="mlx-state">stopped</span>
+        </div>
+
+        <form id="settings-form">
+          <fieldset>
+            <legend>Storage</legend>
+            <div class="settings-grid">
+              <label>
+                Downloaded video and audio directory
+                <input id="media-dir" required>
+              </label>
+              <label>
+                Markdown and knowledge export directory
+                <input id="library-dir" required>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>MLX Audio service</legend>
+            <div class="settings-grid">
+              <label>
+                Service URL
+                <input id="mlx-base-url" type="url" required>
+              </label>
+              <label class="wide-field">
+                Start command
+                <input id="mlx-command" spellcheck="false" required>
+              </label>
+            </div>
+            <div class="service-controls">
+              <button type="button" id="mlx-start">Save &amp; Start</button>
+              <button type="button" class="secondary" id="mlx-stop">Stop</button>
+              <span id="mlx-message">Checking service…</span>
+            </div>
+            <details id="mlx-log-container">
+              <summary>Recent MLX Audio log</summary>
+              <pre id="mlx-log">No managed-process log yet.</pre>
+            </details>
+          </fieldset>
+
+          <fieldset>
+            <legend>LLM summary generation</legend>
+            <div class="settings-grid">
+              <label>
+                Backend
+                <select id="llm-backend">
+                  <option value="codex_cli">Codex CLI (default)</option>
+                  <option value="openai_compatible">OpenAI-compatible API</option>
+                </select>
+              </label>
+              <div class="settings-grid nested wide-field" id="codex-settings">
+                <label>
+                  Codex executable
+                  <input id="codex-cli-path" required>
+                </label>
+                <label>
+                  Model override (optional)
+                  <input id="codex-model" placeholder="Use Codex CLI default">
+                </label>
+                <label>
+                  Timeout in seconds
+                  <input id="codex-timeout" type="number" min="1" required>
+                </label>
+              </div>
+              <div class="settings-grid nested wide-field" id="api-settings" hidden>
+                <label>
+                  API base URL
+                  <input id="llm-base-url" type="url" required>
+                </label>
+                <label>
+                  Model
+                  <input id="llm-model" required>
+                </label>
+              </div>
+            </div>
+          </fieldset>
+
+          <div class="settings-actions">
+            <button type="submit">Save Settings</button>
+            <span id="settings-status" role="status" aria-live="polite"></span>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <footer>
+      Markdown is the source of truth · LRC/JSON preserve synchronized timelines ·
+      One video downloads at a time
+    </footer>
+  </body>
+</html>

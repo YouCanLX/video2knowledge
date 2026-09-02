@@ -1,0 +1,28 @@
+# Operating-system and editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Local configuration, credentials, databases, and generated media
+.env
+.env.*
+!.env.example
+video2knowledge-data/
+data-exported/
+logs/
+
+# Optional local checkout of third-party downloaders
+vendor/

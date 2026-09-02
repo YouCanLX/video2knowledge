@@ -1,0 +1,18 @@
+{
+  "library_dir": "library",
+  "media_dir": "media",
+  "database_path": "library.db",
+  "bili_dl_dir": "/absolute/path/to/video2knowledge/vendor/bili-dl",
+  "cookie_file": "bilibili-cookies.txt",
+  "mlx_base_url": "http://127.0.0.1:8000",
+  "mlx_audio_command": "mlx_audio.server --host 127.0.0.1 --port 8000",
+  "mlx_stt_model": "mlx-community/whisper-large-v3-turbo-asr-fp16",
+  "mlx_tts_model": "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit",
+  "mlx_tts_voice": "Vivian",
+  "llm_backend": "codex_cli",
+  "llm_base_url": "http://127.0.0.1:11434/v1",
+  "llm_model": "qwen3:8b",
+  "codex_cli_path": "codex",
+  "codex_model": "",
+  "codex_timeout_seconds": 900
+}
