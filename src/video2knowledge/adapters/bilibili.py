@@ -322,6 +322,7 @@ class BilibiliProvider:
                 or rights.get("ugc_pay")
                 or rights.get("is_chargeable_season")
             ),
+            creator_avatar_url=_image_url(str(owner.get("face", ""))),
         )
 
     def _search_sync(self, query: str, page: int) -> list[VideoItem]:
@@ -354,6 +355,7 @@ class BilibiliProvider:
                     published_at=str(row.get("pubdate", "")),
                     tags=[query],
                     is_charging="\u5145\u7535" in (badges + title + str(row.get("typename", ""))),
+                    creator_avatar_url=_image_url(str(row.get("upic", ""))),
                 )
             )
         return items
@@ -451,7 +453,8 @@ def _image_url(value: str) -> str:
 
 def _archive_to_video(row: dict, creator_id: int) -> dict:
     bvid = str(row.get("bvid", ""))
-    author = str(row.get("author") or row.get("owner", {}).get("name") or "")
+    owner = row.get("owner") or {}
+    author = str(row.get("author") or owner.get("name") or "")
     duration = row.get("duration", 0)
     return VideoItem(
         platform="bilibili",
@@ -465,6 +468,7 @@ def _archive_to_video(row: dict, creator_id: int) -> dict:
         duration=_parse_duration(str(duration)) if ":" in str(duration) else float(duration or 0),
         published_at=str(row.get("pubdate", "")),
         is_charging=bool(row.get("ugc_pay")),
+        creator_avatar_url=_image_url(str(row.get("upic") or owner.get("face") or "")),
     ).to_dict()
 
 

@@ -71,6 +71,7 @@ class BiliDlProvider(BilibiliProvider):
                 or rights.get("ugc_pay")
                 or rights.get("is_chargeable_season")
             ),
+            creator_avatar_url=_image_url(str(owner.get("face", ""))),
         )
 
     async def get_creator(self, creator_id: int) -> dict[str, str | int]:

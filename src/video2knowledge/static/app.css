@@ -687,12 +687,16 @@ footer { padding: 20px; color: var(--muted); text-align: center; }
 }
 .download-history-creator > summary::-webkit-details-marker { display: none; }
 .download-history-creator > summary:hover { background: #edf2e9; }
-.download-history-creator-placeholder {
-  display: grid;
+.download-history-creator-placeholder,
+.download-history-creator-avatar {
   width: 42px;
   height: 42px;
-  place-items: center;
   border-radius: 50%;
+}
+.download-history-creator-avatar { object-fit: cover; background: #dce9da; }
+.download-history-creator-placeholder {
+  display: grid;
+  place-items: center;
   background: #dce9da;
   color: var(--green);
   font-weight: 800;

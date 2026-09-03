@@ -14,11 +14,13 @@ def test_job_and_document_round_trip(tmp_path):
         "Author",
         tags=["Knowledge"],
         is_charging=True,
+        creator_avatar_url="https://i0.hdslb.com/bfs/face/example.jpg",
     )
     job_id = repo.create_job(item)
     history = repo.get_download_history("BV1")
     assert history["job_id"] == job_id
     assert history["status"] == "queued"
+    assert history["source"]["creator_avatar_url"].endswith("/example.jpg")
     assert repo.get_job(job_id)["downloaded_at"] is None
     repo.mark_job_downloaded(job_id)
     repo.update_job(job_id, JobStatus.TRANSCRIBING, 0.5, "working")

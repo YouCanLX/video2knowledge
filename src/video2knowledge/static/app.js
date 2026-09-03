@@ -567,11 +567,14 @@ function renderDownloadHistory(entries) {
         isCollection: key.startsWith("collection:"),
         title: entry.source.collection_title || entry.source.title,
         author: entry.source.author || "Unknown creator",
+        creatorAvatarUrl: entry.source.creator_avatar_url || "",
         coverUrl: entry.source.cover_url,
         entries: [],
       });
     }
-    downloadHistoryGroups.get(key).entries.push(entry);
+    const group = downloadHistoryGroups.get(key);
+    group.creatorAvatarUrl ||= entry.source.creator_avatar_url || "";
+    group.entries.push(entry);
   });
   const groups = [...downloadHistoryGroups.values()];
   const creators = new Map();
@@ -580,10 +583,13 @@ function renderDownloadHistory(entries) {
       creators.set(group.creatorKey, {
         key: group.creatorKey,
         name: group.author,
+        avatarUrl: group.creatorAvatarUrl,
         groups: [],
       });
     }
-    creators.get(group.creatorKey).groups.push(group);
+    const creator = creators.get(group.creatorKey);
+    creator.avatarUrl ||= group.creatorAvatarUrl;
+    creator.groups.push(group);
   });
   const collections = groups.filter((group) => group.isCollection).length;
   const singles = groups.length - collections;
@@ -598,7 +604,9 @@ function renderDownloadHistory(entries) {
       <details class="download-history-creator" data-history-creator="${escapeHtml(creator.key)}"
         ${expandedDownloadHistoryCreators.has(creator.key) ? "open" : ""}>
         <summary>
-          <span class="download-history-creator-placeholder" aria-hidden="true">C</span>
+          ${creator.avatarUrl
+            ? `<img class="download-history-creator-avatar" src="${escapeHtml(imageSource(creator.avatarUrl))}" alt="" loading="lazy">`
+            : '<span class="download-history-creator-placeholder" aria-hidden="true">C</span>'}
           <span class="download-history-creator-info">
             <span class="history-kind">Creator</span>
             <strong>${escapeHtml(creator.name)}</strong>
@@ -1038,6 +1046,8 @@ async function submitCreatorBatch(scope) {
   if (!state || state.batching) return;
   const payload = {
     creator_id: state.creator.id,
+    creator_name: state.creator.name,
+    creator_avatar_url: state.creator.avatar || "",
     all_collections: scope === "all-collections",
     all_uploads: scope === "all-uploads",
     collections: scope === "selected" ? [...state.selectedCollections.values()].map(

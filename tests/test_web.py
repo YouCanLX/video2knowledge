@@ -134,6 +134,7 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'requestJson("/api/download-history?limit=5000")' in script.text
     assert "historyCreatorKey" in script.text
     assert 'class="download-history-creator"' in script.text
+    assert 'class="download-history-creator-avatar"' in script.text
     assert "expandedDownloadHistoryCreators" in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
@@ -175,7 +176,11 @@ def test_creator_batch_expands_pages_and_removes_duplicate_videos():
             return {"items": rows.get(page, []), "has_more": page == 1}
 
         async def get_creator(self, creator_id):
-            return {"id": creator_id, "name": "Creator"}
+            return {
+                "id": creator_id,
+                "name": "Creator",
+                "avatar": "https://i0.hdslb.com/bfs/face/creator.jpg",
+            }
 
     def video(source_id, title):
         return VideoItem(
@@ -201,6 +206,7 @@ def test_creator_batch_expands_pages_and_removes_duplicate_videos():
         "BV1rP4y117ap",
     }
     assert all(item.author == "Creator" for item in expanded)
+    assert all(item.creator_avatar_url.endswith("/creator.jpg") for item in expanded)
     assert all(item.collection_title == "Trading course" for item in expanded)
 
 

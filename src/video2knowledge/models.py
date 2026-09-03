@@ -36,6 +36,7 @@ class VideoItem:
     collection_kind: str = ""
     collection_id: int = 0
     collection_title: str = ""
+    creator_avatar_url: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

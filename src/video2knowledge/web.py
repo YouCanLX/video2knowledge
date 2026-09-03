@@ -57,6 +57,8 @@ class CollectionSelection(BaseModel):
 
 class CreatorBatchRequest(BaseModel):
     creator_id: int = Field(gt=0)
+    creator_name: str = Field(default="", max_length=300)
+    creator_avatar_url: str = Field(default="", max_length=2000)
     all_collections: bool = False
     all_uploads: bool = False
     collections: list[CollectionSelection] = Field(default_factory=list, max_length=500)
@@ -231,6 +233,18 @@ async def _expand_creator_batch(provider, body: CreatorBatchRequest) -> list[Vid
             video.collection_id = collection.id
             video.collection_title = collection.title
             selected[video.source_id] = video
+    if body.creator_name or body.creator_avatar_url:
+        creator = {
+            "id": body.creator_id,
+            "name": body.creator_name,
+            "avatar": body.creator_avatar_url,
+        }
+    elif creator is None:
+        creator = await provider.get_creator(body.creator_id)
+    for video in selected.values():
+        video.author = video.author or str(creator.get("name", ""))
+        video.author_id = video.author_id or str(body.creator_id)
+        video.creator_avatar_url = video.creator_avatar_url or str(creator.get("avatar", ""))
     return list(selected.values())
 
 

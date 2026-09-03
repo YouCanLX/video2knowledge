@@ -45,7 +45,7 @@ speech and an Apple Music-compatible M4A file.
 - ✅ Organizes the knowledge library by creator and collection while preserving collection
   context in exported documents.
 - ✅ Persists download history and request progress in SQLite with status-based filtering,
-  and groups collections and individual videos under collapsible creator rows.
+  and groups collections and individual videos under collapsible creator rows with avatars.
 - ✅ Supports pausing and resuming queued work, restarting failed jobs individually or in
   batches, and cleaning up stale terminal records.
 - ✅ Provides interactive queue file controls for opening or revealing generated files and
