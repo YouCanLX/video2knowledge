@@ -12,7 +12,7 @@ the in-development `0.1.0` alpha version.
 
 | Type | Change | Commit |
 | --- | --- | --- |
-| Feature | Support multi-select queue filters for creator, collection, status, and created year, month, and day. | Pending |
+| Feature | Support multi-select queue filters for creator, collection, status, and created year, month, and day. | `24fc18e` |
 | UI | Show creator avatars for collections and videos in download history. | `d03907a` |
 | Feature | Group download-history collections and individual videos under collapsible creator rows. | `cadce82` |
 | Feature | Deduplicate downloaded media by SHA-256 content hash while retaining source references. | `d26e58a` |
