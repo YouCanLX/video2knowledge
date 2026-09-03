@@ -10,7 +10,7 @@ CLI / FastAPI web app
 ApplicationServices ── configuration + dependency assembly
         │
         ▼
-Pipeline ───────────── serial orchestration and progress
+Pipeline ───────────── staged concurrency and progress
    │       │       │
    ▼       ▼       ▼
 Video     STT/TTS  TextEnricher       (protocols in ports.py)
@@ -51,10 +51,12 @@ rather than adapter-specific data.
 
 1. Resolve canonical video metadata.
 2. Reuse media matching the source ID unless force refresh is enabled.
-3. Transcribe the audio into timestamped segments.
-4. Enrich the transcript; preserve it even when enrichment fails.
+3. Enter the single-slot local speech stage and transcribe the audio into timestamped segments.
+4. Enrich the transcript in a separately bounded stage; preserve it even when enrichment fails.
 5. Optionally synthesize speech and rebuild timestamps from actual audio durations.
 6. Write the output bundle and update the SQLite document index.
 
-The web application uses a single in-memory worker to prevent concurrent downloads. This is
-an intentional constraint for the current Bilibili account model, not a scaling mechanism.
+The web application runs jobs as an in-memory pipeline. Up to three downloads and three LLM
+enrichments may run concurrently, while local MLX transcription and synthesis share one slot
+to avoid competing for unified memory. Per-source locks prevent duplicate submissions from
+writing the same media and library paths concurrently.

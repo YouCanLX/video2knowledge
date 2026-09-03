@@ -3,8 +3,8 @@
 [简体中文](README.zh-CN.md) | English
 
 Video2Knowledge is a local-first pipeline that turns Bilibili videos into a personal,
-searchable knowledge library. It downloads one video at a time, transcribes audio with
-Whisper Large V3 Turbo through MLX Audio, enriches the transcript with an LLM, and writes
+searchable knowledge library. It downloads up to three videos concurrently, pipelines each
+completed download into MLX Audio transcription and LLM enrichment, and writes
 Markdown, LRC, and JSON timeline files. It can also turn Markdown back into synchronized
 speech and an Apple Music-compatible M4A file.
 
@@ -18,8 +18,8 @@ speech and an Apple Music-compatible M4A file.
 - ✅ Accepts a Bilibili video URL or searches videos and creators in the local web UI.
 - ✅ Uses [`bili-dl`](https://github.com/war-ning/bili-dl) for authenticated and
   charging-content downloads; falls back to `yt-dlp` when `bili-dl` is not configured.
-- ✅ Imports videos in creator-level batches and keeps downloads serial for accounts without
-  Bilibili premium.
+- ✅ Imports videos in creator-level batches with up to three concurrent downloads while
+  independently pipelining transcription and LLM enrichment.
 - ✅ Reuses complete media, transcription, summary, and export results by default and supports
   an explicit force-refresh option.
 - ✅ Computes SHA-256 after download and stores byte-identical media once, with source-to-asset
@@ -253,7 +253,8 @@ performance, documentation, and build history.
   whether the logged-in account may download a video.
 - The GUI currently runs on localhost without user accounts and is not intended for public
   network exposure.
-- Jobs are serialized in memory; restarting the service does not resume interrupted jobs.
+- Active jobs and their pipeline stages are coordinated in memory; restarting the service does
+  not resume interrupted jobs.
 
 ## License
 

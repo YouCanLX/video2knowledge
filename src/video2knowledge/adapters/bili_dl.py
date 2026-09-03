@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from ..config import BILIBILI_DOWNLOAD_CONCURRENCY
 from ..models import VideoItem
 from .bilibili import (
     BilibiliProvider,
@@ -33,7 +34,7 @@ class BiliDlProvider(BilibiliProvider):
         config = manager.load()
         if not config.sessdata:
             raise RuntimeError("bili-dl is not logged in; run v2k login first")
-        config.max_concurrent = 1
+        config.max_concurrent = BILIBILI_DOWNLOAD_CONCURRENCY
         return manager, config, BiliClient(config)
 
     def set_download_dir(self, download_dir: Path) -> None:
@@ -43,7 +44,7 @@ class BiliDlProvider(BilibiliProvider):
         manager = ConfigManager(str(self.data_dir))
         config = manager.load()
         config.download_dir = str(download_dir)
-        config.max_concurrent = 1
+        config.max_concurrent = BILIBILI_DOWNLOAD_CONCURRENCY
         manager.save(config)
 
     async def resolve(self, bvid: str) -> VideoItem:

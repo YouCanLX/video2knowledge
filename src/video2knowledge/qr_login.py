@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+from .config import BILIBILI_DOWNLOAD_CONCURRENCY
+
 
 async def login_and_save(cookie_path: Path, qr_path: Path, timeout: int = 180) -> None:
     """Log in with Bilibili's QR flow without touching browser data."""
@@ -57,7 +59,7 @@ def bili_dl_login_and_save(bili_dl_dir: Path, cookie_path: Path, download_dir: P
         manager = ConfigManager(str(data_dir))
         config = manager.load()
         config.download_dir = str(download_dir)
-        config.max_concurrent = 1
+        config.max_concurrent = BILIBILI_DOWNLOAD_CONCURRENCY
         credential = qr_login()
         if not credential:
             raise TimeoutError("The bili-dl QR code login did not finish")

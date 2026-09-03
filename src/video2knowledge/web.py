@@ -24,7 +24,7 @@ from .adapters.llm import _resolve_codex_executable, create_enricher
 from .config import Settings
 from .mlx_service import MlxAudioServiceManager
 from .models import JobStatus, VideoItem
-from .pipeline import SerialJobRunner, find_cached_media_files
+from .pipeline import PipelineJobRunner, find_cached_media_files
 from .repository import LibraryRepository
 from .services import build_services
 from .urls import extract_bilibili_bvid, extract_bilibili_creator_id
@@ -393,7 +393,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     services = build_services(settings)
     provider = services.provider
     repository = services.repository
-    runner = SerialJobRunner(services.pipeline)
+    runner = PipelineJobRunner(services.pipeline)
     mlx_manager = MlxAudioServiceManager(
         settings.mlx_audio_command,
         settings.mlx_base_url,

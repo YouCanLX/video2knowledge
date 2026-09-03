@@ -1,8 +1,10 @@
 import asyncio
+import threading
+import time
 from pathlib import Path
 
 from video2knowledge.models import Enrichment, TranscriptSegment, VideoItem
-from video2knowledge.pipeline import Pipeline, SerialJobRunner
+from video2knowledge.pipeline import Pipeline, PipelineJobRunner
 from video2knowledge.repository import LibraryRepository
 
 
@@ -45,8 +47,10 @@ class BlockingProvider(FakeProvider):
         super().__init__()
         self.started = asyncio.Event()
         self.release = asyncio.Event()
+        self.started_count = 0
 
     async def download_audio(self, item, output_dir, force_refresh=False):
+        self.started_count += 1
         self.started.set()
         await self.release.wait()
         return await super().download_audio(item, output_dir, force_refresh)
@@ -66,7 +70,7 @@ async def wait_for_job_status(repo, job_id, expected):
             await asyncio.sleep(0.005)
 
 
-def test_serial_runner_never_downloads_concurrently(tmp_path):
+def test_runner_limits_concurrent_downloads_to_three(tmp_path):
     async def scenario():
         provider = FakeProvider()
         repo = LibraryRepository(tmp_path / "db.sqlite")
@@ -79,16 +83,129 @@ def test_serial_runner_never_downloads_concurrently(tmp_path):
             tmp_path / "media",
             tmp_path / "library",
         )
-        runner = SerialJobRunner(pipeline)
-        a = VideoItem("bilibili", "A", "A", "https://a")
-        b = VideoItem("bilibili", "B", "B", "https://b")
-        ids = [await runner.submit(a), await runner.submit(b)]
+        runner = PipelineJobRunner(pipeline)
+        items = [
+            VideoItem("bilibili", source_id, source_id, f"https://{source_id.lower()}")
+            for source_id in ("A", "B", "C", "D")
+        ]
+        ids = [await runner.submit(item) for item in items]
         await runner.queue.join()
-        assert provider.peak == 1
+        assert provider.peak == 3
         assert all(repo.get_job(job_id)["status"] == "complete" for job_id in ids)
         assert (
             tmp_path / "library" / "UnknownCreator" / "UnknownCreator_A_A" / "UnknownCreator_A_A.md"
         ).exists()
+        runner._worker.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_runner_pipelines_download_transcription_and_enrichment(tmp_path):
+    class StagedProvider(FakeProvider):
+        def __init__(self):
+            super().__init__()
+            self.fourth_download_started = threading.Event()
+
+        async def download_audio(self, item, output_dir, force_refresh=False):
+            self.download_count += 1
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            if item.source_id == "D":
+                self.fourth_download_started.set()
+            await asyncio.sleep(0 if item.source_id == "A" else 0.02)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            path = output_dir / "audio.wav"
+            path.write_bytes(item.source_id.encode())
+            self.active -= 1
+            return path
+
+    class StagedSTT(FakeSTT):
+        def __init__(self, provider):
+            self.provider = provider
+            self.active = 0
+            self.peak = 0
+            self.calls = 0
+            self.lock = threading.Lock()
+
+        def transcribe(self, path, language=None):
+            with self.lock:
+                self.calls += 1
+                first_call = self.calls == 1
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+            if first_call and not self.provider.fourth_download_started.wait(0.5):
+                raise AssertionError("the next download did not start during the pipeline")
+            time.sleep(0.02)
+            with self.lock:
+                self.active -= 1
+            return super().transcribe(path, language)
+
+    class StagedLLM(FakeLLM):
+        def __init__(self):
+            self.active = 0
+            self.peak = 0
+
+        async def enrich(self, title, text, language):
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            await asyncio.sleep(0.05)
+            self.active -= 1
+            return await super().enrich(title, text, language)
+
+    async def scenario():
+        provider = StagedProvider()
+        stt = StagedSTT(provider)
+        llm = StagedLLM()
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            provider,
+            stt,
+            llm,
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        runner = PipelineJobRunner(pipeline)
+        ids = [
+            await runner.submit(
+                VideoItem("bilibili", source_id, source_id, f"https://{source_id.lower()}")
+            )
+            for source_id in ("A", "B", "C", "D")
+        ]
+
+        await runner.queue.join()
+
+        assert provider.peak == 3
+        assert stt.peak == 1
+        assert 2 <= llm.peak <= 3
+        assert all(repo.get_job(job_id)["status"] == "complete" for job_id in ids)
+        runner._worker.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_runner_serializes_duplicate_source_ids(tmp_path):
+    async def scenario():
+        provider = FakeProvider()
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            provider,
+            FakeSTT(),
+            FakeLLM(),
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        runner = PipelineJobRunner(pipeline)
+        item = VideoItem("bilibili", "SAME", "Same", "https://same")
+        ids = [await runner.submit(item), await runner.submit(item)]
+
+        await runner.queue.join()
+
+        assert provider.download_count == 1
+        assert all(repo.get_job(job_id)["status"] == "complete" for job_id in ids)
         runner._worker.cancel()
 
     asyncio.run(scenario())
@@ -107,7 +224,7 @@ def test_runner_pauses_active_job_at_safe_stage_boundary_and_resumes(tmp_path):
             tmp_path / "media",
             tmp_path / "library",
         )
-        runner = SerialJobRunner(pipeline)
+        runner = PipelineJobRunner(pipeline)
         item = VideoItem("bilibili", "PAUSE", "Pause", "https://example.test/pause")
 
         job_id = await runner.submit(item)
@@ -141,25 +258,36 @@ def test_runner_pauses_queued_job_without_blocking_other_job(tmp_path):
             tmp_path / "media",
             tmp_path / "library",
         )
-        runner = SerialJobRunner(pipeline)
-        first = await runner.submit(
-            VideoItem("bilibili", "FIRST", "First", "https://example.test/first")
-        )
-        await provider.started.wait()
+        runner = PipelineJobRunner(pipeline)
+        first = [
+            await runner.submit(
+                VideoItem(
+                    "bilibili",
+                    f"FIRST{index}",
+                    f"First {index}",
+                    f"https://example.test/first/{index}",
+                )
+            )
+            for index in range(3)
+        ]
+        async with asyncio.timeout(1):
+            while provider.started_count < 3:
+                await asyncio.sleep(0.005)
         second = await runner.submit(
             VideoItem("bilibili", "SECOND", "Second", "https://example.test/second")
         )
 
         assert runner.pause(second)["status"] == "paused"
         provider.release.set()
-        await wait_for_job_status(repo, first, "complete")
+        for job_id in first:
+            await wait_for_job_status(repo, job_id, "complete")
         await wait_for_job_status(repo, second, "paused")
-        assert provider.download_count == 1
+        assert provider.download_count == 3
 
         runner.resume(second)
         await runner.queue.join()
         assert repo.get_job(second)["status"] == "complete"
-        assert provider.download_count == 2
+        assert provider.download_count == 4
         runner._worker.cancel()
 
     asyncio.run(scenario())
@@ -178,7 +306,7 @@ def test_runner_restarts_failed_job_with_original_options(tmp_path):
             tmp_path / "media",
             tmp_path / "library",
         )
-        runner = SerialJobRunner(pipeline)
+        runner = PipelineJobRunner(pipeline)
         item = VideoItem("bilibili", "RESTART", "Restart", "https://example.test/restart")
 
         job_id = await runner.submit(item, language="en-US", synthesize=True, force_refresh=True)
@@ -213,7 +341,7 @@ def test_runner_batch_restart_validates_every_job_before_requeueing(tmp_path):
             tmp_path / "media",
             tmp_path / "library",
         )
-        runner = SerialJobRunner(pipeline)
+        runner = PipelineJobRunner(pipeline)
         runner.start = lambda: None
         failed = repo.create_job(
             VideoItem("bilibili", "FAILED", "Failed", "https://example.test/failed")

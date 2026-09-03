@@ -891,7 +891,7 @@ function renderCreatorBrowser() {
       </button>
       <button type="button" class="secondary" data-batch-scope="all-uploads"
         ${state.batching ? "disabled" : ""}>Process every upload</button>
-      <p>Both options fetch every page in the background, remove duplicates, and add videos to the serial queue.</p>
+      <p>Both options fetch every page in the background, remove duplicates, and add videos to the processing pipeline.</p>
     </div>
 
     <details class="creator-source" ${state.uploads.expanded ? "open" : ""}>
@@ -1081,7 +1081,7 @@ async function submitCreatorBatch(scope) {
   };
   if (scope !== "selected") {
     const label = scope === "all-uploads" ? "every upload" : "every video in all collections";
-    if (!window.confirm(`Add ${label} to the serial processing queue?`)) return;
+    if (!window.confirm(`Add ${label} to the processing pipeline?`)) return;
   }
   state.batching = true;
   creatorStatus.textContent = "Checking processing services…";
@@ -1104,7 +1104,7 @@ async function submitCreatorBatch(scope) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
-    creatorStatus.textContent = `${data.submitted} unique videos added to the serial queue.`;
+    creatorStatus.textContent = `${data.submitted} unique videos added to the processing pipeline.`;
     trackRequestJobs(progressRequestId, data.job_ids, requestLabel);
     state.selectedCollections.clear();
     state.selectedVideos.clear();

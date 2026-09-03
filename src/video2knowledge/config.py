@@ -8,6 +8,7 @@ from pathlib import Path
 DEFAULT_STT_MODEL = "mlx-community/whisper-large-v3-turbo-asr-fp16"
 DEFAULT_TTS_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit"
 DEFAULT_MLX_AUDIO_COMMAND = "mlx_audio.server --host 127.0.0.1 --port 8000"
+BILIBILI_DOWNLOAD_CONCURRENCY = 3
 DATA_DIR_NAME = "video2knowledge-data"
 CONFIG_FILE_NAME = "config.json"
 

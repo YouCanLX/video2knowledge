@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
+from .config import BILIBILI_DOWNLOAD_CONCURRENCY
 from .exporters import write_bundle
 from .models import JobStatus, KnowledgeDocument, VideoItem
 from .naming import library_filename_stem, library_relative_directory
@@ -31,6 +32,8 @@ MEDIA_SUFFIXES = {
     ".webm",
 }
 REQUIRED_REUSABLE_OUTPUTS = {"markdown", "lyrics", "timeline", "metadata", "source_media"}
+TRANSCRIPTION_CONCURRENCY = 1
+ENRICHMENT_CONCURRENCY = 3
 
 
 def find_cached_media_files(media_dir: Path, source_id: str) -> list[Path]:
@@ -95,6 +98,10 @@ class Pipeline:
     ):
         self.provider, self.stt, self.enricher, self.tts = provider, stt, enricher, tts
         self.repository, self.media_dir, self.library_dir = repository, media_dir, library_dir
+        self._download_slots = asyncio.Semaphore(BILIBILI_DOWNLOAD_CONCURRENCY)
+        self._speech_slots = asyncio.Semaphore(TRANSCRIPTION_CONCURRENCY)
+        self._enrichment_slots = asyncio.Semaphore(ENRICHMENT_CONCURRENCY)
+        self._source_locks: dict[str, asyncio.Lock] = {}
 
     async def _deduplicate_media(self, source_id: str, path: Path) -> tuple[Path, bool]:
         sha256, size_bytes = await asyncio.to_thread(sha256_file, path)
@@ -138,6 +145,21 @@ class Pipeline:
         synthesize: bool = False,
         force_refresh: bool = False,
         checkpoint: PauseCheckpoint | None = None,
+    ) -> dict[str, str]:
+        source_lock = self._source_locks.setdefault(item.source_id, asyncio.Lock())
+        async with source_lock:
+            return await self._run_one(
+                job_id, item, language, synthesize, force_refresh, checkpoint
+            )
+
+    async def _run_one(
+        self,
+        job_id: str,
+        item: VideoItem,
+        language: str,
+        synthesize: bool,
+        force_refresh: bool,
+        checkpoint: PauseCheckpoint | None,
     ) -> dict[str, str]:
         try:
             if not force_refresh:
@@ -184,10 +206,18 @@ class Pipeline:
                 )
             else:
                 message = "Refreshing audio download" if force_refresh else "Downloading audio"
-                await self._set_stage(job_id, JobStatus.DOWNLOADING, 0.1, message, checkpoint)
-                audio = await self.provider.download_audio(
-                    item, self.media_dir / item.source_id, force_refresh=force_refresh
+                await self._set_stage(
+                    job_id,
+                    JobStatus.QUEUED,
+                    0.05,
+                    "Waiting for download slot",
+                    checkpoint,
                 )
+                async with self._download_slots:
+                    await self._set_stage(job_id, JobStatus.DOWNLOADING, 0.1, message, checkpoint)
+                    audio = await self.provider.download_audio(
+                        item, self.media_dir / item.source_id, force_refresh=force_refresh
+                    )
             if not registered or force_refresh:
                 await self._set_stage(
                     job_id,
@@ -209,27 +239,41 @@ class Pipeline:
             await self._set_stage(
                 job_id,
                 JobStatus.TRANSCRIBING,
-                0.35,
-                "Transcribing locally",
+                0.32,
+                "Waiting for transcription slot",
                 checkpoint,
             )
-            segments = await asyncio.to_thread(self.stt.transcribe, audio, language)
+            async with self._speech_slots:
+                await self._set_stage(
+                    job_id,
+                    JobStatus.TRANSCRIBING,
+                    0.35,
+                    "Transcribing locally",
+                    checkpoint,
+                )
+                segments = await asyncio.to_thread(self.stt.transcribe, audio, language)
             if not segments:
                 raise RuntimeError("The transcription result is empty")
             await self._set_stage(
-                job_id, JobStatus.ENRICHING, 0.65, "Generating summary", checkpoint
+                job_id, JobStatus.ENRICHING, 0.62, "Waiting for enrichment slot", checkpoint
             )
-            try:
-                enrichment = await self.enricher.enrich(
-                    item.title, "\n".join(s.text for s in segments), language
+            async with self._enrichment_slots:
+                await self._set_stage(
+                    job_id, JobStatus.ENRICHING, 0.65, "Generating summary", checkpoint
                 )
-            except Exception as exc:  # noqa: BLE001 - optional enrichment must not lose transcript
-                logger.warning("enrichment failed: %s", exc)
-                from .models import Enrichment
+                try:
+                    enrichment = await self.enricher.enrich(
+                        item.title, "\n".join(s.text for s in segments), language
+                    )
+                except Exception as exc:  # noqa: BLE001 - preserve transcript
+                    logger.warning("enrichment failed: %s", exc)
+                    from .models import Enrichment
 
-                enrichment = Enrichment(
-                    summary=["LLM enrichment is unavailable; the full transcript was preserved."]
-                )
+                    enrichment = Enrichment(
+                        summary=[
+                            "LLM enrichment is unavailable; the full transcript was preserved."
+                        ]
+                    )
             document = KnowledgeDocument(item, segments, enrichment, language)
             filename_stem = library_filename_stem(item)
             output_dir = self.library_dir / library_relative_directory(item)
@@ -239,16 +283,24 @@ class Pipeline:
                 await self._set_stage(
                     job_id,
                     JobStatus.SYNTHESIZING,
-                    0.82,
-                    "Synthesizing speech locally",
+                    0.8,
+                    "Waiting for speech synthesis slot",
                     checkpoint,
                 )
-                synthesized = await asyncio.to_thread(
-                    self.tts.synthesize,
-                    segments,
-                    output_dir / f"{filename_stem}-tts.wav",
-                    language,
-                )
+                async with self._speech_slots:
+                    await self._set_stage(
+                        job_id,
+                        JobStatus.SYNTHESIZING,
+                        0.82,
+                        "Synthesizing speech locally",
+                        checkpoint,
+                    )
+                    synthesized = await asyncio.to_thread(
+                        self.tts.synthesize,
+                        segments,
+                        output_dir / f"{filename_stem}-tts.wav",
+                        language,
+                    )
             await self._set_stage(
                 job_id,
                 JobStatus.SYNTHESIZING if synthesize else JobStatus.ENRICHING,
@@ -256,7 +308,8 @@ class Pipeline:
                 "Writing library files",
                 checkpoint,
             )
-            outputs = {key: str(value) for key, value in write_bundle(document, output_dir).items()}
+            written = await asyncio.to_thread(write_bundle, document, output_dir)
+            outputs = {key: str(value) for key, value in written.items()}
             outputs["source_media"] = str(audio)
             if synthesized:
                 outputs["audio"] = str(synthesized)
@@ -289,19 +342,20 @@ class _JobControl:
     pause_requested: bool = False
     resume_status: JobStatus = JobStatus.QUEUED
     resume_progress: float = 0
-    resume_message: str = "Waiting in serial queue"
+    resume_message: str = "Waiting in processing pipeline"
 
     def __post_init__(self) -> None:
         self.resume_event.set()
 
 
-class SerialJobRunner:
-    """One-worker queue: intentionally enforces one download at a time."""
+class PipelineJobRunner:
+    """Run jobs concurrently while Pipeline semaphores bound each resource stage."""
 
     def __init__(self, pipeline: Pipeline):
         self.pipeline = pipeline
         self.queue: asyncio.Queue[tuple[str, VideoItem, str, bool, bool]] = asyncio.Queue()
         self._worker: asyncio.Task[None] | None = None
+        self._tasks: set[asyncio.Task[None]] = set()
         self._controls: dict[str, _JobControl] = {}
 
     def start(self) -> None:
@@ -371,12 +425,12 @@ class SerialJobRunner:
 
         control.resume_status = status
         control.resume_progress = float(job["progress"])
-        control.resume_message = str(job["message"] or "Waiting in serial queue")
+        control.resume_message = str(job["message"] or "Waiting in processing pipeline")
         control.pause_requested = True
         control.resume_event.clear()
         if status == JobStatus.QUEUED:
             paused_status = JobStatus.PAUSED
-            message = "Paused in serial queue"
+            message = "Paused in processing pipeline"
         else:
             paused_status = JobStatus.PAUSING
             message = "Pause requested; finishing the current step safely"
@@ -426,25 +480,43 @@ class SerialJobRunner:
     async def _work(self) -> None:
         while True:
             job_id, item, language, synthesize, force_refresh = await self.queue.get()
-            control = self._controls[job_id]
-            try:
-                await self._checkpoint(
-                    job_id,
-                    control,
-                    JobStatus.QUEUED,
-                    0,
-                    "Waiting in serial queue",
-                )
-                await self.pipeline.run(
-                    job_id,
-                    item,
-                    language,
-                    synthesize,
-                    force_refresh,
-                    checkpoint=partial(self._checkpoint, job_id, control),
-                )
-            except Exception:
-                logger.exception("job %s failed", job_id)
-            finally:
-                self._controls.pop(job_id, None)
-                self.queue.task_done()
+            task = asyncio.create_task(
+                self._run_job(job_id, item, language, synthesize, force_refresh)
+            )
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+    async def _run_job(
+        self,
+        job_id: str,
+        item: VideoItem,
+        language: str,
+        synthesize: bool,
+        force_refresh: bool,
+    ) -> None:
+        control = self._controls[job_id]
+        try:
+            await self._checkpoint(
+                job_id,
+                control,
+                JobStatus.QUEUED,
+                0,
+                "Waiting in processing pipeline",
+            )
+            await self.pipeline.run(
+                job_id,
+                item,
+                language,
+                synthesize,
+                force_refresh,
+                checkpoint=partial(self._checkpoint, job_id, control),
+            )
+        except Exception:
+            logger.exception("job %s failed", job_id)
+        finally:
+            self._controls.pop(job_id, None)
+            self.queue.task_done()
+
+
+# Backward-compatible import for integrations built before the pipelined runner.
+SerialJobRunner = PipelineJobRunner
