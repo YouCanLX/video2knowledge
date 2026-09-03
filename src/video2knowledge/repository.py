@@ -35,7 +35,10 @@ class LibraryRepository:
               outputs_json TEXT NOT NULL DEFAULT '{}',
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              downloaded_at TEXT
+              downloaded_at TEXT,
+              language TEXT NOT NULL DEFAULT 'zh-CN',
+              synthesize INTEGER NOT NULL DEFAULT 0,
+              force_refresh INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS documents (
               source_id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT NOT NULL,
@@ -61,6 +64,18 @@ class LibraryRepository:
         }
         if "downloaded_at" not in columns:
             self.connection.execute("ALTER TABLE jobs ADD COLUMN downloaded_at TEXT")
+        if "language" not in columns:
+            self.connection.execute(
+                "ALTER TABLE jobs ADD COLUMN language TEXT NOT NULL DEFAULT 'zh-CN'"
+            )
+        if "synthesize" not in columns:
+            self.connection.execute(
+                "ALTER TABLE jobs ADD COLUMN synthesize INTEGER NOT NULL DEFAULT 0"
+            )
+        if "force_refresh" not in columns:
+            self.connection.execute(
+                "ALTER TABLE jobs ADD COLUMN force_refresh INTEGER NOT NULL DEFAULT 0"
+            )
         history_migrated = self.connection.execute(
             "SELECT value FROM app_metadata WHERE key='download_history_v1'"
         ).fetchone()
@@ -79,11 +94,26 @@ class LibraryRepository:
             )
         self.connection.commit()
 
-    def create_job(self, item: VideoItem) -> str:
+    def create_job(
+        self,
+        item: VideoItem,
+        language: str = "zh-CN",
+        synthesize: bool = False,
+        force_refresh: bool = False,
+    ) -> str:
         job_id = uuid.uuid4().hex
         self.connection.execute(
-            "INSERT INTO jobs(id, source_json, status) VALUES (?, ?, ?)",
-            (job_id, json.dumps(item.to_dict(), ensure_ascii=False), JobStatus.QUEUED),
+            """INSERT INTO jobs(
+                 id, source_json, status, language, synthesize, force_refresh
+               ) VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                job_id,
+                json.dumps(item.to_dict(), ensure_ascii=False),
+                JobStatus.QUEUED,
+                language,
+                int(synthesize),
+                int(force_refresh),
+            ),
         )
         self.connection.execute(
             """INSERT INTO download_history(job_id, source_id, source_json, status)
@@ -102,6 +132,41 @@ class LibraryRepository:
         )
         self.connection.commit()
         return job_id
+
+    def restart_job(self, job_id: str) -> bool:
+        row = self.connection.execute(
+            "SELECT source_json, downloaded_at FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        if not row:
+            return False
+        self.connection.execute(
+            """UPDATE jobs
+               SET status=?, progress=0, message='Restarted and queued', outputs_json='{}',
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE id=?""",
+            (JobStatus.QUEUED, job_id),
+        )
+        self.connection.execute(
+            """INSERT INTO download_history(
+                 source_id, job_id, source_json, status, progress, message,
+                 outputs_json, downloaded_at
+               ) VALUES (json_extract(?, '$.source_id'), ?, ?, ?, 0, ?, '{}', ?)
+               ON CONFLICT(source_id) DO UPDATE SET
+                 job_id=excluded.job_id, source_json=excluded.source_json,
+                 status=excluded.status, progress=0, message=excluded.message,
+                 outputs_json='{}', updated_at=CURRENT_TIMESTAMP,
+                 downloaded_at=excluded.downloaded_at""",
+            (
+                row["source_json"],
+                job_id,
+                row["source_json"],
+                JobStatus.QUEUED,
+                "Restarted and queued",
+                row["downloaded_at"],
+            ),
+        )
+        self.connection.commit()
+        return True
 
     def update_job(
         self,
@@ -239,6 +304,8 @@ class LibraryRepository:
         data = dict(row)
         data["source"] = json.loads(data.pop("source_json"))
         data["outputs"] = json.loads(data.pop("outputs_json"))
+        data["synthesize"] = bool(data["synthesize"])
+        data["force_refresh"] = bool(data["force_refresh"])
         return data
 
     @staticmethod

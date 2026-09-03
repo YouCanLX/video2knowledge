@@ -400,6 +400,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @app.post("/api/jobs/{job_id}/restart", status_code=202)
+    async def restart_job(job_id: str):
+        try:
+            return await runner.restart(job_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Job not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     def output_path(job_id: str, output_key: str) -> Path:
         job = repository.get_job(job_id)
         if not job:

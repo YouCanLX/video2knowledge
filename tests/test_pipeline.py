@@ -51,6 +51,14 @@ class BlockingProvider(FakeProvider):
         return await super().download_audio(item, output_dir, force_refresh)
 
 
+class FailOnceProvider(FakeProvider):
+    async def download_audio(self, item, output_dir, force_refresh=False):
+        if self.download_count == 0:
+            self.download_count += 1
+            raise RuntimeError("temporary download failure")
+        return await super().download_audio(item, output_dir, force_refresh)
+
+
 async def wait_for_job_status(repo, job_id, expected):
     async with asyncio.timeout(1):
         while repo.get_job(job_id)["status"] != expected:
@@ -155,6 +163,44 @@ def test_runner_pauses_queued_job_without_blocking_other_job(tmp_path):
         await runner.queue.join()
         assert repo.get_job(second)["status"] == "complete"
         assert provider.download_count == 2
+        runner._worker.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_runner_restarts_failed_job_with_original_options(tmp_path):
+    async def scenario():
+        provider = FailOnceProvider()
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            provider,
+            FakeSTT(),
+            FakeLLM(),
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        runner = SerialJobRunner(pipeline)
+        item = VideoItem("bilibili", "RESTART", "Restart", "https://example.test/restart")
+
+        job_id = await runner.submit(
+            item, language="en-US", synthesize=True, force_refresh=True
+        )
+        await runner.queue.join()
+        assert repo.get_job(job_id)["status"] == "failed"
+
+        restarted = await runner.restart(job_id)
+        assert restarted["id"] == job_id
+        assert restarted["status"] == "queued"
+        await runner.queue.join()
+
+        completed = repo.get_job(job_id)
+        assert completed["status"] == "complete"
+        assert completed["language"] == "en-US"
+        assert completed["synthesize"] is True
+        assert completed["force_refresh"] is True
+        assert "audio" in completed["outputs"]
         runner._worker.cancel()
 
     asyncio.run(scenario())

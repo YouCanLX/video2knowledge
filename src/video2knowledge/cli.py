@@ -94,7 +94,7 @@ def process(
         item.title = title
     if author:
         item.author = author
-    job_id = services.repository.create_job(item)
+    job_id = services.repository.create_job(item, language, synthesize, force_refresh)
     outputs = asyncio.run(services.pipeline.run(job_id, item, language, synthesize, force_refresh))
     for kind, path in outputs.items():
         typer.echo(f"{kind}: {path}")
