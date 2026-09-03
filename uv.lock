@@ -2116,7 +2116,7 @@ mlx = [
 
 [package.metadata]
 requires-dist = [
-    { name = "av", marker = "extra == 'audio'", specifier = ">=14,<17" },
+    { name = "av", marker = "extra == 'audio'", specifier = ">=14,<19" },
     { name = "bilibili-api-python", marker = "extra == 'bilibili'", specifier = ">=17,<18" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2,<2" },
     { name = "fastapi", specifier = ">=0.115,<1" },

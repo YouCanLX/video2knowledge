@@ -29,7 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 bilibili = ["bilibili-api-python>=17,<18", "yt-dlp>=2025.1"]
-audio = ["av>=14,<17"]
+audio = ["av>=14,<19"]
 mlx = ["mlx-audio>=0.2"]
 dev = ["build>=1.2,<2", "pytest>=8,<10", "ruff>=0.8,<1"]
 
