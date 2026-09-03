@@ -691,8 +691,24 @@ function jobCreatedDateKey(value) {
   return parts ? `${parts.year}-${parts.month}-${parts.day}` : "Unknown date";
 }
 
-function jobMatchesStatusFilter(job, filter) {
-  if (!filter) return true;
+function selectedFilterValues(element) {
+  return [...element.selectedOptions].map((option) => option.value).filter(Boolean);
+}
+
+function restoreFilterValues(element, values) {
+  const selected = new Set(values);
+  [...element.options].forEach((option) => {
+    option.selected = selected.has(option.value);
+  });
+}
+
+function clearFilterValues(element) {
+  [...element.options].forEach((option) => {
+    option.selected = false;
+  });
+}
+
+function jobMatchesSingleStatusFilter(job, filter) {
   if (filter === "running") {
     return !["complete", "failed", "queued", "paused", "pausing"].includes(job.status);
   }
@@ -702,39 +718,39 @@ function jobMatchesStatusFilter(job, filter) {
   return job.status === filter;
 }
 
+function jobMatchesStatusFilter(job, filters) {
+  return !filters.length || filters.some((filter) => jobMatchesSingleStatusFilter(job, filter));
+}
+
 function setDateFilterOptions(data) {
-  const selectedYear = queueYearFilter.value;
-  const selectedMonth = queueMonthFilter.value;
-  const selectedDay = queueDayFilter.value;
+  const selectedYears = selectedFilterValues(queueYearFilter);
+  const selectedMonths = selectedFilterValues(queueMonthFilter);
+  const selectedDays = selectedFilterValues(queueDayFilter);
   const dates = data.map((job) => jobCreatedDateParts(job.created_at)).filter(Boolean);
   const years = [...new Set(dates.map((date) => date.year))].sort().reverse();
-  queueYearFilter.innerHTML = `
-    <option value="">All years</option>
-    ${years.map((year) => `<option value="${year}">${year}</option>`).join("")}
-  `;
-  if (years.includes(selectedYear)) queueYearFilter.value = selectedYear;
+  queueYearFilter.innerHTML = years
+    .map((year) => `<option value="${year}">${year}</option>`).join("");
+  restoreFilterValues(queueYearFilter, selectedYears);
+  const activeYears = selectedFilterValues(queueYearFilter);
 
-  const months = queueYearFilter.value
-    ? [...new Set(dates.filter((date) => date.year === queueYearFilter.value)
+  const months = activeYears.length
+    ? [...new Set(dates.filter((date) => activeYears.includes(date.year))
       .map((date) => date.month))].sort()
     : [];
-  queueMonthFilter.innerHTML = `
-    <option value="">All months</option>
-    ${months.map((month) => `<option value="${month}">${month}</option>`).join("")}
-  `;
-  queueMonthFilter.disabled = !queueYearFilter.value;
-  if (months.includes(selectedMonth)) queueMonthFilter.value = selectedMonth;
+  queueMonthFilter.innerHTML = months
+    .map((month) => `<option value="${month}">${month}</option>`).join("");
+  queueMonthFilter.disabled = !activeYears.length;
+  restoreFilterValues(queueMonthFilter, selectedMonths);
+  const activeMonths = selectedFilterValues(queueMonthFilter);
 
-  const days = queueYearFilter.value && queueMonthFilter.value
-    ? [...new Set(dates.filter((date) => date.year === queueYearFilter.value
-      && date.month === queueMonthFilter.value).map((date) => date.day))].sort()
+  const days = activeYears.length && activeMonths.length
+    ? [...new Set(dates.filter((date) => activeYears.includes(date.year)
+      && activeMonths.includes(date.month)).map((date) => date.day))].sort()
     : [];
-  queueDayFilter.innerHTML = `
-    <option value="">All days</option>
-    ${days.map((day) => `<option value="${day}">${day}</option>`).join("")}
-  `;
-  queueDayFilter.disabled = !queueMonthFilter.value;
-  if (days.includes(selectedDay)) queueDayFilter.value = selectedDay;
+  queueDayFilter.innerHTML = days
+    .map((day) => `<option value="${day}">${day}</option>`).join("");
+  queueDayFilter.disabled = !activeMonths.length;
+  restoreFilterValues(queueDayFilter, selectedDays);
 }
 
 async function requestJson(url, options = {}) {
@@ -1290,40 +1306,38 @@ async function pollJobs() {
     [...selectedQueueJobs].forEach((jobId) => {
       if (!existingJobIds.has(jobId)) selectedQueueJobs.delete(jobId);
     });
-    const selectedCreator = queueCreatorFilter.value;
-    const selectedCollection = queueCollectionFilter.value;
+    const selectedCreators = selectedFilterValues(queueCreatorFilter);
+    const selectedCollections = selectedFilterValues(queueCollectionFilter);
     const creators = [...new Set(data.map((job) => job.source.author || "Unknown creator"))]
       .sort((left, right) => left.localeCompare(right));
-    queueCreatorFilter.innerHTML = `
-      <option value="">All creators</option>
-      ${creators.map((creator) => `<option value="${escapeHtml(creator)}">${escapeHtml(creator)}</option>`).join("")}
-    `;
-    if (creators.includes(selectedCreator)) queueCreatorFilter.value = selectedCreator;
+    queueCreatorFilter.innerHTML = creators
+      .map((creator) => `<option value="${escapeHtml(creator)}">${escapeHtml(creator)}</option>`).join("");
+    restoreFilterValues(queueCreatorFilter, selectedCreators);
     const collections = [...new Set(data.map((job) => job.source.collection_title).filter(Boolean))]
       .sort((left, right) => left.localeCompare(right));
     const hasUnassigned = data.some((job) => !job.source.collection_title);
     queueCollectionFilter.innerHTML = `
-      <option value="">All collections</option>
       ${collections.map((collection) => `<option value="${escapeHtml(collection)}">${escapeHtml(collection)}</option>`).join("")}
       ${hasUnassigned ? '<option value="__none__">No collection data</option>' : ""}
     `;
-    if (collections.includes(selectedCollection)
-        || (selectedCollection === "__none__" && hasUnassigned)) {
-      queueCollectionFilter.value = selectedCollection;
-    }
+    restoreFilterValues(queueCollectionFilter, selectedCollections);
     setDateFilterOptions(data);
+    const activeCreators = selectedFilterValues(queueCreatorFilter);
+    const activeCollections = selectedFilterValues(queueCollectionFilter);
+    const activeYears = selectedFilterValues(queueYearFilter);
+    const activeMonths = selectedFilterValues(queueMonthFilter);
+    const activeDays = selectedFilterValues(queueDayFilter);
+    const activeStatuses = selectedFilterValues(queueStatusFilter);
     const filteredData = data.filter((job) => {
-      const creatorMatches = !queueCreatorFilter.value
-        || (job.source.author || "Unknown creator") === queueCreatorFilter.value;
-      const collectionMatches = !queueCollectionFilter.value
-        || (queueCollectionFilter.value === "__none__"
-          ? !job.source.collection_title
-          : job.source.collection_title === queueCollectionFilter.value);
+      const creatorMatches = !activeCreators.length
+        || activeCreators.includes(job.source.author || "Unknown creator");
+      const collectionMatches = !activeCollections.length
+        || activeCollections.includes(job.source.collection_title || "__none__");
       const created = jobCreatedDateParts(job.created_at);
-      const yearMatches = !queueYearFilter.value || created?.year === queueYearFilter.value;
-      const monthMatches = !queueMonthFilter.value || created?.month === queueMonthFilter.value;
-      const dayMatches = !queueDayFilter.value || created?.day === queueDayFilter.value;
-      const statusMatches = jobMatchesStatusFilter(job, queueStatusFilter.value);
+      const yearMatches = !activeYears.length || activeYears.includes(created?.year);
+      const monthMatches = !activeMonths.length || activeMonths.includes(created?.month);
+      const dayMatches = !activeDays.length || activeDays.includes(created?.day);
+      const statusMatches = jobMatchesStatusFilter(job, activeStatuses);
       return creatorMatches && collectionMatches && yearMatches && monthMatches
         && dayMatches && statusMatches;
     });
@@ -1855,12 +1869,12 @@ queueCreatorFilter.addEventListener("change", pollJobs);
 queueCollectionFilter.addEventListener("change", pollJobs);
 queueStatusFilter.addEventListener("change", pollJobs);
 queueYearFilter.addEventListener("change", () => {
-  queueMonthFilter.value = "";
-  queueDayFilter.value = "";
+  clearFilterValues(queueMonthFilter);
+  clearFilterValues(queueDayFilter);
   pollJobs();
 });
 queueMonthFilter.addEventListener("change", () => {
-  queueDayFilter.value = "";
+  clearFilterValues(queueDayFilter);
   pollJobs();
 });
 queueDayFilter.addEventListener("change", pollJobs);

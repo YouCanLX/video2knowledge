@@ -74,13 +74,13 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="queue-toggle"' in page.text
     assert 'aria-controls="queue-content"' in page.text
     assert 'id="queue-summary"' in page.text
-    assert 'id="queue-creator-filter"' in page.text
-    assert 'id="queue-collection-filter"' in page.text
-    assert 'id="queue-status-filter"' in page.text
+    assert 'id="queue-creator-filter" multiple' in page.text
+    assert 'id="queue-collection-filter" multiple' in page.text
+    assert 'id="queue-status-filter" multiple' in page.text
     assert '<option value="paused">Paused</option>' in page.text
-    assert 'id="queue-year-filter"' in page.text
-    assert 'id="queue-month-filter"' in page.text
-    assert 'id="queue-day-filter"' in page.text
+    assert 'id="queue-year-filter" aria-label="Created year" multiple' in page.text
+    assert 'id="queue-month-filter" aria-label="Created month" multiple' in page.text
+    assert 'id="queue-day-filter" aria-label="Created day" multiple' in page.text
     assert 'id="expand-all-jobs"' in page.text
     assert 'id="collapse-all-jobs"' in page.text
     assert 'id="select-visible-jobs"' in page.text
@@ -113,6 +113,8 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert '"/api/jobs/batch-restart"' in script.text
     assert 'requestJson("/api/jobs?limit=5000")' in script.text
     assert 'filter === "running"' in script.text
+    assert "selectedFilterValues" in script.text
+    assert "filters.some" in script.text
     assert "trackRequestJobs(progressRequestId, data.job_ids, requestLabel)" in script.text
     assert "renderRequestProgress(data)" in script.text
     assert "REQUEST_IDLE_TIMEOUT_MS = 60 * 60 * 1000" in script.text

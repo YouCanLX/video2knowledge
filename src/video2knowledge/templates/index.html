@@ -130,47 +130,45 @@
           </button>
           <div class="queue-content" id="queue-content">
             <div class="queue-toolbar">
-              <label for="queue-creator-filter">Creator</label>
-              <select id="queue-creator-filter">
-                <option value="">All creators</option>
-              </select>
-              <label for="queue-collection-filter">Collection</label>
-              <select id="queue-collection-filter">
-                <option value="">All collections</option>
-              </select>
-              <label for="queue-status-filter">Status</label>
-              <select id="queue-status-filter">
-                <option value="">All statuses</option>
-                <option value="complete">Complete</option>
-                <option value="failed">Failed</option>
-                <option value="running">Running</option>
-                <option value="queued">Queued</option>
-                <option value="paused">Paused</option>
-              </select>
+              <div class="queue-filter-field">
+                <label for="queue-creator-filter">Creator</label>
+                <select id="queue-creator-filter" multiple size="4"></select>
+              </div>
+              <div class="queue-filter-field">
+                <label for="queue-collection-filter">Collection</label>
+                <select id="queue-collection-filter" multiple size="4"></select>
+              </div>
+              <div class="queue-filter-field">
+                <label for="queue-status-filter">Status</label>
+                <select id="queue-status-filter" multiple size="4">
+                  <option value="complete">Complete</option>
+                  <option value="failed">Failed</option>
+                  <option value="running">Running</option>
+                  <option value="queued">Queued</option>
+                  <option value="paused">Paused</option>
+                </select>
+              </div>
               <div class="queue-view-actions">
                 <button type="button" class="secondary" id="expand-all-jobs">Expand all</button>
                 <button type="button" class="secondary" id="collapse-all-jobs">Collapse all</button>
               </div>
+              <small class="queue-filter-help">
+                Select multiple options with Command/Ctrl or Shift. No selection means all.
+              </small>
             </div>
             <div class="queue-date-filters" aria-label="Created date filters">
               <span>Created</span>
               <label>
                 <span class="sr-only">Created year</span>
-                <select id="queue-year-filter" aria-label="Created year">
-                  <option value="">All years</option>
-                </select>
+                <select id="queue-year-filter" aria-label="Created year" multiple size="4"></select>
               </label>
               <label>
                 <span class="sr-only">Created month</span>
-                <select id="queue-month-filter" aria-label="Created month" disabled>
-                  <option value="">All months</option>
-                </select>
+                <select id="queue-month-filter" aria-label="Created month" multiple size="4" disabled></select>
               </label>
               <label>
                 <span class="sr-only">Created day</span>
-                <select id="queue-day-filter" aria-label="Created day" disabled>
-                  <option value="">All days</option>
-                </select>
+                <select id="queue-day-filter" aria-label="Created day" multiple size="4" disabled></select>
               </label>
             </div>
             <div class="queue-bulk-actions">

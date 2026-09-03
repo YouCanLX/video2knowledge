@@ -441,23 +441,25 @@ main {
 .queue-date-group[open] > summary { border-bottom: 1px solid var(--line); }
 .queue-date-jobs .job:last-child { border-bottom: 0; }
 .queue-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr)) auto;
+  align-items: end;
   gap: 8px;
   margin-bottom: 8px;
   color: var(--muted);
   font-size: 12px;
 }
+.queue-filter-field { display: grid; gap: 4px; }
 .queue-toolbar select {
-  min-width: 90px;
-  flex: 1;
+  width: 100%;
+  min-height: 74px;
   padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: white;
   color: var(--ink);
 }
+.queue-filter-help { grid-column: 1 / -1; color: var(--muted); }
 .queue-view-actions { display: flex; gap: 5px; }
 .queue-view-actions button { padding: 6px 8px; font-size: 10px; white-space: nowrap; }
 .queue-date-filters {
@@ -471,6 +473,7 @@ main {
 }
 .queue-date-filters select {
   width: 100%;
+  min-height: 74px;
   padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -981,7 +984,7 @@ pre {
   .settings-grid { grid-template-columns: 1fr; }
   .wide-field { grid-column: auto; }
   .job-file { grid-template-columns: 1fr; }
-  .queue-toolbar { align-items: stretch; flex-direction: column; }
+  .queue-toolbar { grid-template-columns: 1fr; }
   .queue-view-actions button { flex: 1; }
   .queue-date-filters { grid-template-columns: 1fr; }
   .queue-bulk-actions { flex-wrap: wrap; }
