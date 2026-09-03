@@ -44,6 +44,7 @@ include = [
   "/src",
   "/tests",
   "/README.md",
+  "/README.zh-CN.md",
   "/CONTRIBUTING.md",
   "/SECURITY.md",
   "/config.example.json",

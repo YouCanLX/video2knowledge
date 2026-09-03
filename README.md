@@ -1,5 +1,7 @@
 # Video2Knowledge
 
+[简体中文](README.zh-CN.md) | English
+
 Video2Knowledge is a local-first pipeline that turns Bilibili videos into a personal,
 searchable knowledge library. It downloads one video at a time, transcribes audio with
 Whisper Large V3 Turbo through MLX Audio, enriches the transcript with an LLM, and writes
