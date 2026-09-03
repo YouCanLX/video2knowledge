@@ -42,6 +42,18 @@ class LibraryRepository:
               tags_json TEXT NOT NULL, is_charging INTEGER NOT NULL, markdown_path TEXT NOT NULL,
               audio_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS download_history (
+              source_id TEXT PRIMARY KEY, job_id TEXT NOT NULL,
+              source_json TEXT NOT NULL, status TEXT NOT NULL,
+              progress REAL NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
+              outputs_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              downloaded_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS app_metadata (
+              key TEXT PRIMARY KEY, value TEXT NOT NULL
+            );
             """
         )
         columns = {
@@ -49,6 +61,22 @@ class LibraryRepository:
         }
         if "downloaded_at" not in columns:
             self.connection.execute("ALTER TABLE jobs ADD COLUMN downloaded_at TEXT")
+        history_migrated = self.connection.execute(
+            "SELECT value FROM app_metadata WHERE key='download_history_v1'"
+        ).fetchone()
+        if not history_migrated:
+            self.connection.execute(
+                """INSERT OR IGNORE INTO download_history(
+                     source_id, job_id, source_json, status, progress, message,
+                     outputs_json, created_at, updated_at, downloaded_at
+                   )
+                   SELECT json_extract(source_json, '$.source_id'), id, source_json, status,
+                          progress, message, outputs_json, created_at, updated_at, downloaded_at
+                   FROM jobs"""
+            )
+            self.connection.execute(
+                "INSERT INTO app_metadata(key, value) VALUES ('download_history_v1', 'complete')"
+            )
         self.connection.commit()
 
     def create_job(self, item: VideoItem) -> str:
@@ -56,6 +84,21 @@ class LibraryRepository:
         self.connection.execute(
             "INSERT INTO jobs(id, source_json, status) VALUES (?, ?, ?)",
             (job_id, json.dumps(item.to_dict(), ensure_ascii=False), JobStatus.QUEUED),
+        )
+        self.connection.execute(
+            """INSERT INTO download_history(job_id, source_id, source_json, status)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(source_id) DO UPDATE SET
+                 job_id=excluded.job_id, source_json=excluded.source_json,
+                 status=excluded.status, progress=0, message='', outputs_json='{}',
+                 created_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP,
+                 downloaded_at=NULL""",
+            (
+                job_id,
+                item.source_id,
+                json.dumps(item.to_dict(), ensure_ascii=False),
+                JobStatus.QUEUED,
+            ),
         )
         self.connection.commit()
         return job_id
@@ -81,6 +124,19 @@ class LibraryRepository:
                 job_id,
             ),
         )
+        self.connection.execute(
+            """UPDATE download_history
+               SET status=?, progress=?, message=?, outputs_json=?,
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE job_id=?""",
+            (
+                status,
+                min(1, max(0, progress)),
+                message,
+                json.dumps(outputs or {}, ensure_ascii=False),
+                job_id,
+            ),
+        )
         self.connection.commit()
 
     def mark_job_downloaded(self, job_id: str) -> None:
@@ -89,6 +145,13 @@ class LibraryRepository:
                SET downloaded_at=COALESCE(downloaded_at, CURRENT_TIMESTAMP),
                    updated_at=CURRENT_TIMESTAMP
                WHERE id=?""",
+            (job_id,),
+        )
+        self.connection.execute(
+            """UPDATE download_history
+               SET downloaded_at=COALESCE(downloaded_at, CURRENT_TIMESTAMP),
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE job_id=?""",
             (job_id,),
         )
         self.connection.commit()
@@ -105,6 +168,25 @@ class LibraryRepository:
 
     def delete_job(self, job_id: str) -> bool:
         cursor = self.connection.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+        self.connection.commit()
+        return cursor.rowcount > 0
+
+    def get_download_history(self, source_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT * FROM download_history WHERE source_id=?", (source_id,)
+        ).fetchone()
+        return self._history_dict(row) if row else None
+
+    def list_download_history(self, limit: int = 5000) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            "SELECT * FROM download_history ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [self._history_dict(row) for row in rows]
+
+    def delete_download_history(self, source_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM download_history WHERE source_id=?", (source_id,)
+        )
         self.connection.commit()
         return cursor.rowcount > 0
 
@@ -154,6 +236,13 @@ class LibraryRepository:
 
     @staticmethod
     def _job_dict(row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        data["source"] = json.loads(data.pop("source_json"))
+        data["outputs"] = json.loads(data.pop("outputs_json"))
+        return data
+
+    @staticmethod
+    def _history_dict(row: sqlite3.Row) -> dict[str, Any]:
         data = dict(row)
         data["source"] = json.loads(data.pop("source_json"))
         data["outputs"] = json.loads(data.pop("outputs_json"))

@@ -21,78 +21,176 @@ const creatorContent = select("#creator-content");
 const settingsStatus = select("#settings-status");
 const settingsToggle = select("#settings-toggle");
 const settingsContent = select("#settings-content");
-const requestProgress = select("#request-progress");
-const requestProgressKicker = select("#request-progress-kicker");
-const requestProgressTitle = select("#request-progress-title");
-const requestProgressBar = select("#request-progress-bar");
-const requestProgressCounts = select("#request-progress-counts");
-const requestProgressDetail = select("#request-progress-detail");
+const downloadHistoryList = select("#download-history-list");
+const downloadHistorySummary = select("#download-history-summary");
+const downloadHistoryStatus = select("#download-history-status");
+const requestProgressStack = select("#request-progress-stack");
 const isStaticPreview = window.location.protocol === "file:";
+const REQUEST_PROGRESS_STORAGE_KEY = "v2k.request-progress.v2";
+const REQUEST_LAST_INTERACTION_KEY = "v2k.request-progress.last-interaction";
+const REQUEST_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 let searchResults = [];
+let latestJobs = [];
 const expandedFileJobs = new Set();
 const expandedQueueJobs = new Set();
 const selectedQueueJobs = new Set();
+const trackedRequests = new Map();
+const downloadHistoryGroups = new Map();
 let creatorState = null;
-let trackedRequest = null;
+let lastUserInteraction = Number(localStorage.getItem(REQUEST_LAST_INTERACTION_KEY)) || Date.now();
+
+function requestId() {
+  return globalThis.crypto?.randomUUID?.()
+    || `request-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function saveTrackedRequests() {
+  localStorage.setItem(REQUEST_PROGRESS_STORAGE_KEY, JSON.stringify([...trackedRequests.values()]));
+}
+
+function loadTrackedRequests() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(REQUEST_PROGRESS_STORAGE_KEY) || "[]");
+    stored.forEach((request) => {
+      if (request?.id && request?.label) trackedRequests.set(request.id, request);
+    });
+  } catch (_error) {
+    localStorage.removeItem(REQUEST_PROGRESS_STORAGE_KEY);
+  }
+}
 
 function beginRequestProgress(label, message = "Preparing the request…") {
-  trackedRequest = { label, jobIds: null };
-  requestProgress.hidden = false;
-  requestProgress.className = "request-progress active";
-  requestProgressKicker.textContent = "Submitting request";
-  requestProgressTitle.textContent = label;
-  requestProgressBar.removeAttribute("value");
-  requestProgressCounts.textContent = message;
-  requestProgressDetail.textContent = "Waiting for the jobs to enter the processing queue.";
+  const id = requestId();
+  trackedRequests.set(id, {
+    id,
+    label,
+    message,
+    jobIds: null,
+    state: "submitting",
+    createdAt: Date.now(),
+    completedAt: null,
+  });
+  saveTrackedRequests();
+  renderRequestProgress(latestJobs);
+  return id;
 }
 
-function trackRequestJobs(jobIds, label) {
-  trackedRequest = { label, jobIds: new Set(jobIds) };
-  requestProgress.hidden = false;
-  requestProgress.className = "request-progress active";
-  requestProgressKicker.textContent = "Request progress";
-  requestProgressTitle.textContent = label;
-  requestProgressBar.value = 0;
-  requestProgressCounts.textContent = `0 of ${jobIds.length} finished`;
-  requestProgressDetail.textContent = "Waiting for queue status…";
+function trackRequestJobs(id, jobIds, label) {
+  const request = trackedRequests.get(id);
+  if (!request) return;
+  Object.assign(request, { label, jobIds, state: "active", message: "" });
+  saveTrackedRequests();
+  renderRequestProgress(latestJobs);
 }
 
-function failRequestProgress(message) {
-  requestProgress.hidden = false;
-  requestProgress.className = "request-progress failed";
-  requestProgressKicker.textContent = "Request failed";
-  requestProgressBar.value = 100;
-  requestProgressCounts.textContent = message;
-  requestProgressDetail.textContent = "No additional jobs were added by this request.";
-  trackedRequest = null;
+function failRequestProgress(id, message) {
+  const request = trackedRequests.get(id);
+  if (!request) return;
+  Object.assign(request, {
+    state: "failed",
+    message,
+    completedAt: Date.now(),
+  });
+  saveTrackedRequests();
+  renderRequestProgress(latestJobs);
+}
+
+function requestProgressState(request, allJobs) {
+  if (!request.jobIds) {
+    return {
+      className: request.state === "failed" ? "failed" : "active",
+      kicker: request.state === "failed" ? "Request failed" : "Submitting request",
+      percent: request.state === "failed" ? 100 : null,
+      countsText: request.message,
+      detail: request.state === "failed"
+        ? "No additional jobs were added by this request."
+        : "Waiting for the jobs to enter the processing queue.",
+      complete: request.state === "failed",
+    };
+  }
+  const requestJobIds = new Set(request.jobIds);
+  const jobsForRequest = allJobs.filter((job) => requestJobIds.has(job.id));
+  const counts = { complete: 0, failed: 0, queued: 0, running: 0 };
+  jobsForRequest.forEach((job) => {
+    if (["complete", "failed", "queued"].includes(job.status)) counts[job.status] += 1;
+    else counts.running += 1;
+  });
+  const total = request.jobIds.length;
+  const finished = counts.complete + counts.failed;
+  const unavailable = total - jobsForRequest.length;
+  const percent = total ? Math.round((finished / total) * 100) : 0;
+  const complete = finished === total;
+  return {
+    className: complete ? (counts.failed ? "finished-with-errors" : "finished") : "active",
+    kicker: complete
+      ? (counts.failed ? "Request finished with failures" : "Request complete")
+      : "Request progress",
+    percent,
+    countsText: `${finished} of ${total} finished · ${percent}%`,
+    detail: [
+      `${counts.complete} complete`, `${counts.failed} failed`,
+      `${counts.running} running`, `${counts.queued} queued`,
+      unavailable ? `${unavailable} pending status` : "",
+    ].filter(Boolean).join(" · "),
+    complete,
+  };
 }
 
 function renderRequestProgress(allJobs) {
-  if (!trackedRequest?.jobIds) return;
-  const requestJobs = allJobs.filter((job) => trackedRequest.jobIds.has(job.id));
-  const counts = { complete: 0, failed: 0, queued: 0, running: 0 };
-  requestJobs.forEach((job) => {
-    if (job.status in counts && job.status !== "running") counts[job.status] += 1;
-    else counts.running += 1;
+  let changed = false;
+  const cards = [...trackedRequests.values()]
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .map((request) => {
+      const state = requestProgressState(request, allJobs);
+      if (state.complete && !request.completedAt) {
+        request.completedAt = Date.now();
+        changed = true;
+      }
+      return `
+        <article class="request-progress-card ${state.className}" data-request-card="${escapeHtml(request.id)}">
+          <div class="request-progress-heading">
+            <div>
+              <small>${escapeHtml(state.kicker)}</small>
+              <strong title="${escapeHtml(request.label)}">${escapeHtml(request.label)}</strong>
+            </div>
+            <button type="button" class="request-progress-close" data-close-request="${escapeHtml(request.id)}"
+              aria-label="Close ${escapeHtml(request.label)} progress">×</button>
+          </div>
+          <progress max="100" ${state.percent === null ? "" : `value="${state.percent}"`}></progress>
+          <div class="request-progress-counts">${escapeHtml(state.countsText)}</div>
+          <small>${escapeHtml(state.detail)}</small>
+        </article>
+      `;
+    });
+  requestProgressStack.innerHTML = cards.join("");
+  requestProgressStack.querySelectorAll("[data-close-request]").forEach((button) => {
+    button.addEventListener("click", () => {
+      trackedRequests.delete(button.dataset.closeRequest);
+      saveTrackedRequests();
+      renderRequestProgress(latestJobs);
+    });
   });
-  const total = trackedRequest.jobIds.size;
-  const finished = counts.complete + counts.failed;
-  const unavailable = total - requestJobs.length;
-  const percent = total ? Math.round((finished / total) * 100) : 0;
-  requestProgressBar.value = percent;
-  requestProgressCounts.textContent = `${finished} of ${total} finished · ${percent}%`;
-  requestProgressDetail.textContent = [
-    `${counts.complete} complete`,
-    `${counts.failed} failed`,
-    `${counts.running} running`,
-    `${counts.queued} queued`,
-    unavailable ? `${unavailable} pending status` : "",
-  ].filter(Boolean).join(" · ");
-  if (finished === total) {
-    requestProgress.className = counts.failed
-      ? "request-progress finished-with-errors"
-      : "request-progress finished";
-    requestProgressKicker.textContent = counts.failed ? "Request finished with failures" : "Request complete";
+  if (changed) saveTrackedRequests();
+}
+
+function noteUserInteraction() {
+  lastUserInteraction = Date.now();
+  localStorage.setItem(REQUEST_LAST_INTERACTION_KEY, String(lastUserInteraction));
+}
+
+function requestProgressWatchdog() {
+  const now = Date.now();
+  let changed = false;
+  trackedRequests.forEach((request, id) => {
+    if (request.completedAt
+        && now - Math.max(request.completedAt, lastUserInteraction) >= REQUEST_IDLE_TIMEOUT_MS) {
+      trackedRequests.delete(id);
+      changed = true;
+    }
+  });
+  if (changed) {
+    saveTrackedRequests();
+    renderRequestProgress(latestJobs);
   }
 }
 
@@ -123,6 +221,15 @@ function imageSource(url) {
   return url ? `/api/bilibili/image?url=${encodeURIComponent(url)}` : "";
 }
 
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch (_error) {
+    return "";
+  }
+}
+
 function formatJobTime(value) {
   if (!value) return "";
   const timestamp = String(value).includes("T") ? String(value) : `${value.replace(" ", "T")}Z`;
@@ -135,6 +242,134 @@ function formatJobTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function historyGroupKey(entry) {
+  const source = entry.source;
+  if (source.collection_title || source.collection_id) {
+    return [
+      "collection",
+      source.author_id || source.author,
+      source.collection_kind,
+      source.collection_id || source.collection_title,
+    ].join(":");
+  }
+  return `video:${source.source_id}`;
+}
+
+function renderDownloadHistory(entries) {
+  downloadHistoryGroups.clear();
+  entries.forEach((entry) => {
+    const key = historyGroupKey(entry);
+    if (!downloadHistoryGroups.has(key)) {
+      downloadHistoryGroups.set(key, {
+        key,
+        isCollection: key.startsWith("collection:"),
+        title: entry.source.collection_title || entry.source.title,
+        author: entry.source.author || "Unknown creator",
+        coverUrl: entry.source.cover_url,
+        entries: [],
+      });
+    }
+    downloadHistoryGroups.get(key).entries.push(entry);
+  });
+  const groups = [...downloadHistoryGroups.values()];
+  const collections = groups.filter((group) => group.isCollection).length;
+  const singles = groups.length - collections;
+  downloadHistorySummary.textContent = entries.length
+    ? `${entries.length} videos · ${collections} collections · ${singles} individual`
+    : "No local download history yet";
+  downloadHistoryList.innerHTML = groups.length ? groups.map((group) => {
+    const statusCounts = { complete: 0, failed: 0, queued: 0, running: 0 };
+    group.entries.forEach((entry) => {
+      if (["complete", "failed", "queued"].includes(entry.status)) {
+        statusCounts[entry.status] += 1;
+      } else {
+        statusCounts.running += 1;
+      }
+    });
+    const active = statusCounts.queued + statusCounts.running;
+    const latest = group.entries[0];
+    const sourceUrl = !group.isCollection ? safeExternalUrl(latest.source.url) : "";
+    const statusText = [
+      statusCounts.complete ? `${statusCounts.complete} complete` : "",
+      statusCounts.failed ? `${statusCounts.failed} failed` : "",
+      statusCounts.running ? `${statusCounts.running} running` : "",
+      statusCounts.queued ? `${statusCounts.queued} queued` : "",
+    ].filter(Boolean).join(" · ");
+    return `
+      <article class="download-history-card">
+        ${group.coverUrl
+          ? `<img src="${escapeHtml(imageSource(group.coverUrl))}" alt="" loading="lazy">`
+          : '<div class="download-history-placeholder" aria-hidden="true">V</div>'}
+        <div class="download-history-info">
+          <span class="history-kind">${group.isCollection ? "Collection" : "Video"}</span>
+          <strong title="${escapeHtml(group.title)}">${escapeHtml(group.title)}</strong>
+          <small>${escapeHtml(group.author)} · ${group.entries.length} video${group.entries.length === 1 ? "" : "s"}</small>
+          <small>${escapeHtml(statusText || "Pending")} · ${escapeHtml(formatJobTime(latest.created_at))}</small>
+          ${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Open video ↗</a>` : ""}
+        </div>
+        <div class="download-history-actions">
+          <button type="button" class="secondary" data-delete-history="${escapeHtml(group.key)}">
+            Delete history
+          </button>
+          <button type="button" class="danger" data-delete-history-files="${escapeHtml(group.key)}"
+            ${active ? "disabled title=\"Wait for active downloads to finish\"" : ""}>
+            Delete history &amp; files
+          </button>
+        </div>
+      </article>
+    `;
+  }).join("") : '<div class="empty">No local download history yet</div>';
+  downloadHistoryList.querySelectorAll("[data-delete-history]").forEach((button) => {
+    button.addEventListener("click", () => deleteDownloadHistoryGroup(
+      button.dataset.deleteHistory, false,
+    ));
+  });
+  downloadHistoryList.querySelectorAll("[data-delete-history-files]").forEach((button) => {
+    button.addEventListener("click", () => deleteDownloadHistoryGroup(
+      button.dataset.deleteHistoryFiles, true,
+    ));
+  });
+}
+
+async function pollDownloadHistory() {
+  try {
+    const entries = await requestJson("/api/download-history?limit=5000");
+    renderDownloadHistory(entries);
+  } catch (error) {
+    downloadHistorySummary.textContent = "History unavailable";
+    downloadHistoryList.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function deleteDownloadHistoryGroup(key, deleteFiles) {
+  const group = downloadHistoryGroups.get(key);
+  if (!group) return;
+  const target = group.isCollection
+    ? `collection “${group.title}” and its ${group.entries.length} video record(s)`
+    : `video history “${group.title}”`;
+  const warning = deleteFiles
+    ? `Delete ${target} and all downloaded/generated local files? This cannot be undone.`
+    : `Delete ${target}? Local files and Processing Queue records will be kept.`;
+  if (!window.confirm(warning)) return;
+  downloadHistoryStatus.textContent = "Deleting local history…";
+  try {
+    const result = await requestJson("/api/download-history/batch-delete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source_ids: group.entries.map((entry) => entry.source.source_id),
+        delete_files: deleteFiles,
+      }),
+    });
+    downloadHistoryStatus.textContent = deleteFiles
+      ? `${result.count} record(s) and ${result.removed_files.length} local file(s) deleted.`
+      : `${result.count} local history record(s) deleted; files were kept.`;
+    await pollDownloadHistory();
+  } catch (error) {
+    downloadHistoryStatus.textContent = error.message;
+  }
 }
 
 function jobCreatedDateParts(value) {
@@ -509,7 +744,9 @@ async function submitCreatorBatch(scope) {
   state.batching = true;
   creatorStatus.textContent = "Expanding the selection across all pages…";
   const requestLabel = `${state.creator.name} · ${scope === "all-collections" ? "all collections" : scope === "all-uploads" ? "all uploads" : "selected videos"}`;
-  beginRequestProgress(requestLabel, "Expanding the selection across all pages…");
+  const progressRequestId = beginRequestProgress(
+    requestLabel, "Expanding the selection across all pages…",
+  );
   renderCreatorBrowser();
   try {
     const data = await requestJson("/api/jobs/creator-batch", {
@@ -518,13 +755,13 @@ async function submitCreatorBatch(scope) {
       body: JSON.stringify(payload),
     });
     creatorStatus.textContent = `${data.submitted} unique videos added to the serial queue.`;
-    trackRequestJobs(data.job_ids, requestLabel);
+    trackRequestJobs(progressRequestId, data.job_ids, requestLabel);
     state.selectedCollections.clear();
     state.selectedVideos.clear();
-    await pollJobs();
+    await Promise.all([pollJobs(), pollDownloadHistory()]);
   } catch (error) {
     creatorStatus.textContent = error.message;
-    failRequestProgress(error.message);
+    failRequestProgress(progressRequestId, error.message);
   } finally {
     state.batching = false;
     renderCreatorBrowser();
@@ -661,7 +898,7 @@ select("#url-form").addEventListener("submit", async (event) => {
   const button = event.submitter;
   button.disabled = true;
   urlStatus.textContent = "Resolving video…";
-  beginRequestProgress("Bilibili video", "Resolving video details…");
+  const progressRequestId = beginRequestProgress("Bilibili video", "Resolving video details…");
   try {
     const data = await requestJson("/api/jobs/url", {
       method: "POST",
@@ -669,36 +906,37 @@ select("#url-form").addEventListener("submit", async (event) => {
       body: jobPayload({ url: select("#video-url").value }),
     });
     urlStatus.textContent = `Added to queue: ${data.video.title}`;
-    trackRequestJobs([data.id], data.video.title);
+    trackRequestJobs(progressRequestId, [data.id], data.video.title);
     select("#video-url").value = "";
-    await pollJobs();
+    await Promise.all([pollJobs(), pollDownloadHistory()]);
   } catch (error) {
     urlStatus.textContent = error.message;
-    failRequestProgress(error.message);
+    failRequestProgress(progressRequestId, error.message);
   } finally {
     button.disabled = false;
   }
 });
 
 async function submitVideo(video) {
-  beginRequestProgress(video.title, "Adding video to the queue…");
+  const progressRequestId = beginRequestProgress(video.title, "Adding video to the queue…");
   try {
     const data = await requestJson("/api/jobs", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: jobPayload({ video }),
     });
-    trackRequestJobs([data.id], video.title);
-    await pollJobs();
+    trackRequestJobs(progressRequestId, [data.id], video.title);
+    await Promise.all([pollJobs(), pollDownloadHistory()]);
   } catch (error) {
     urlStatus.textContent = error.message;
-    failRequestProgress(error.message);
+    failRequestProgress(progressRequestId, error.message);
   }
 }
 
 async function pollJobs() {
   try {
     const data = await requestJson("/api/jobs?limit=5000");
+    latestJobs = data;
     const existingJobIds = new Set(data.map((job) => job.id));
     [...selectedQueueJobs].forEach((jobId) => {
       if (!existingJobIds.has(jobId)) selectedQueueJobs.delete(jobId);
@@ -751,6 +989,7 @@ async function pollJobs() {
       const expanded = expandedQueueJobs.has(job.id);
       const author = job.source.author || "Unknown creator";
       const collectionTitle = job.source.collection_title || "No collection data";
+      const sourceUrl = safeExternalUrl(job.source.url);
       const timeValue = job.downloaded_at || job.created_at;
       const timePrefix = job.downloaded_at ? "Downloaded" : "Added";
       const outputPaths = job.status === "complete" && outputEntries.length
@@ -813,6 +1052,18 @@ async function pollJobs() {
         <div class="bar"><i style="width: ${job.progress * 100}%"></i></div>
         <div class="job-body" ${expanded ? "" : "hidden"}>
           <small>${escapeHtml(job.message)}</small>
+          <div class="job-source-link">
+            <span>Source video</span>
+            ${sourceUrl ? `
+              <div>
+                <a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer"
+                  title="Open original video">${escapeHtml(sourceUrl)}</a>
+                <button type="button" class="secondary" data-copy-job-link="${escapeHtml(sourceUrl)}">
+                  Copy link
+                </button>
+              </div>
+            ` : '<small>Source link unavailable</small>'}
+          </div>
           ${outputPaths}
           <div class="job-actions">
             <button type="button" class="secondary" data-delete-job="${escapeHtml(job.id)}"
@@ -850,6 +1101,9 @@ async function pollJobs() {
         else selectedQueueJobs.delete(input.dataset.selectJob);
         updateQueueSelectionControls();
       });
+    });
+    jobs.querySelectorAll("[data-copy-job-link]").forEach((button) => {
+      button.addEventListener("click", () => copyJobLink(button.dataset.copyJobLink));
     });
     jobs.querySelectorAll("[data-output-action]").forEach((button) => {
       button.addEventListener("click", () => openJobOutput(
@@ -910,6 +1164,25 @@ async function openJobOutput(jobId, outputKey, action) {
       : `Opened: ${result.path}`;
   } catch (error) {
     queueStatus.textContent = error.message;
+  }
+}
+
+async function copyJobLink(url) {
+  try {
+    await navigator.clipboard.writeText(url);
+    queueStatus.textContent = "Video link copied to the clipboard.";
+  } catch (_error) {
+    const input = document.createElement("textarea");
+    input.value = url;
+    input.style.position = "fixed";
+    input.style.opacity = "0";
+    document.body.append(input);
+    input.select();
+    const copied = document.execCommand("copy");
+    input.remove();
+    queueStatus.textContent = copied
+      ? "Video link copied to the clipboard."
+      : "Could not copy the video link. Select the URL and copy it manually.";
   }
 }
 
@@ -1064,6 +1337,7 @@ select("#mlx-stop").addEventListener("click", async () => {
 
 select("#charging-only").addEventListener("change", renderResults);
 select("#tag-filter").addEventListener("input", renderResults);
+select("#refresh-download-history").addEventListener("click", pollDownloadHistory);
 queueToggle.addEventListener("click", () => {
   const expanded = queueToggle.getAttribute("aria-expanded") === "true";
   queueToggle.setAttribute("aria-expanded", String(!expanded));
@@ -1092,10 +1366,6 @@ selectVisibleJobs.addEventListener("change", () => {
   updateQueueSelectionControls();
 });
 deleteSelectedJobs.addEventListener("click", deleteSelectedJobRecords);
-select("#request-progress-close").addEventListener("click", () => {
-  requestProgress.hidden = true;
-  trackedRequest = null;
-});
 select("#expand-all-jobs").addEventListener("click", () => {
   jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
     expandedQueueJobs.add(button.dataset.toggleJob);
@@ -1131,10 +1401,18 @@ if (isStaticPreview) {
   creatorStatus.textContent = "Start the local app to browse creators and submit jobs.";
   queueSummary.textContent = "Preview only";
   jobs.innerHTML = '<div class="empty">Start the local app to view the processing queue</div>';
+  select("#refresh-download-history").disabled = true;
 } else {
+  loadTrackedRequests();
+  renderRequestProgress(latestJobs);
+  document.addEventListener("click", noteUserInteraction, { passive: true });
+  document.addEventListener("keydown", noteUserInteraction, { passive: true });
   loadSettings();
   pollJobs();
+  pollDownloadHistory();
   pollMlxStatus();
   setInterval(pollJobs, 2500);
+  setInterval(pollDownloadHistory, 5000);
   setInterval(pollMlxStatus, 2500);
+  setInterval(requestProgressWatchdog, 60 * 1000);
 }

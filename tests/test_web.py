@@ -77,9 +77,9 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="settings-toggle"' in page.text
     assert 'aria-controls="settings-content"' in page.text
     assert 'id="settings-content" hidden' in page.text
-    assert 'id="request-progress"' in page.text
-    assert 'id="request-progress-bar"' in page.text
-    assert 'id="request-progress-close"' in page.text
+    assert 'id="request-progress-stack"' in page.text
+    assert 'id="download-history-list"' in page.text
+    assert 'id="refresh-download-history"' in page.text
     assert 'href="../static/app.css"' in page.text
     assert 'id="preview-warning"' in page.text
     assert stylesheet.status_code == 200
@@ -87,11 +87,16 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "Open File" in script.text
     assert "Show in Finder" in script.text
     assert "data-quick-delete-job" in script.text
+    assert "data-copy-job-link" in script.text
+    assert 'target="_blank" rel="noopener noreferrer"' in script.text
+    assert 'navigator.clipboard.writeText(url)' in script.text
     assert '"/api/jobs/batch-delete"' in script.text
     assert 'requestJson("/api/jobs?limit=5000")' in script.text
     assert 'filter === "running"' in script.text
-    assert "trackRequestJobs(data.job_ids, requestLabel)" in script.text
+    assert "trackRequestJobs(progressRequestId, data.job_ids, requestLabel)" in script.text
     assert "renderRequestProgress(data)" in script.text
+    assert "REQUEST_IDLE_TIMEOUT_MS = 60 * 60 * 1000" in script.text
+    assert 'requestJson("/api/download-history?limit=5000")' in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
     assert 'data-batch-scope="all-collections"' in script.text
@@ -365,6 +370,69 @@ def test_batch_delete_is_atomic_when_selection_contains_active_job(tmp_path):
 
     assert response.status_code == 409
     assert repo.get_job(completed) is not None
+
+
+def test_download_history_is_independent_and_can_delete_local_files(tmp_path):
+    async def scenario():
+        settings = Settings.load(tmp_path)
+        app = create_app(settings)
+        repo = app.state.services.repository
+        item = VideoItem(
+            "bilibili",
+            "BV1HISTORY",
+            "History",
+            "https://example.test/history",
+            "Creator",
+            collection_id=7,
+            collection_title="Course",
+        )
+        output = settings.library_dir / "Creator" / "Course" / "BV1HISTORY.md"
+        output.parent.mkdir(parents=True)
+        output.write_text("content", encoding="utf-8")
+        job_id = repo.create_job(item)
+        repo.update_job(job_id, JobStatus.COMPLETE, 1, outputs={"markdown": str(output)})
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            listed = await client.get("/api/download-history")
+            deleted = await client.post(
+                "/api/download-history/batch-delete",
+                json={"source_ids": [item.source_id], "delete_files": True},
+            )
+        return listed, deleted, repo, job_id, output
+
+    listed, deleted, repo, job_id, output = asyncio.run(scenario())
+
+    assert listed.status_code == 200
+    assert listed.json()[0]["source"]["collection_title"] == "Course"
+    assert deleted.status_code == 200
+    assert deleted.json()["removed_files"] == [str(output)]
+    assert repo.get_download_history("BV1HISTORY") is None
+    assert repo.get_job(job_id) is not None
+    assert not output.exists()
+
+
+def test_active_download_history_can_be_removed_but_its_files_cannot(tmp_path):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        repo = app.state.services.repository
+        item = VideoItem("bilibili", "BV1ACTIVEHISTORY", "Active", "https://example.test")
+        repo.create_job(item)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            blocked = await client.post(
+                "/api/download-history/batch-delete",
+                json={"source_ids": [item.source_id], "delete_files": True},
+            )
+            record_only = await client.post(
+                "/api/download-history/batch-delete",
+                json={"source_ids": [item.source_id], "delete_files": False},
+            )
+        return blocked, record_only
+
+    blocked, record_only = asyncio.run(scenario())
+
+    assert blocked.status_code == 409
+    assert record_only.status_code == 200
 
 
 def test_completed_job_output_can_be_opened_or_revealed(tmp_path, monkeypatch):

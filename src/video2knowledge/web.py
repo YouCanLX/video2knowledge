@@ -67,6 +67,11 @@ class DeleteJobsRequest(BaseModel):
     job_ids: list[str] = Field(min_length=1, max_length=500)
 
 
+class DeleteDownloadHistoryRequest(BaseModel):
+    source_ids: list[str] = Field(min_length=1, max_length=5000)
+    delete_files: bool = False
+
+
 class RuntimeSettingsRequest(BaseModel):
     media_dir: str = Field(min_length=1)
     library_dir: str = Field(min_length=1)
@@ -447,6 +452,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for job_id in job_ids:
             repository.delete_job(job_id)
         return {"deleted": job_ids, "count": len(job_ids)}
+
+    @app.get("/api/download-history")
+    async def list_download_history(limit: int = Query(default=5000, ge=1, le=5000)):
+        return repository.list_download_history(limit=limit)
+
+    @app.post("/api/download-history/batch-delete")
+    async def delete_download_history(body: DeleteDownloadHistoryRequest):
+        source_ids = list(dict.fromkeys(body.source_ids))
+        entries = {
+            source_id: repository.get_download_history(source_id)
+            for source_id in source_ids
+        }
+        missing = [source_id for source_id, entry in entries.items() if entry is None]
+        active = [
+            source_id
+            for source_id, entry in entries.items()
+            if entry is not None and entry["status"] not in TERMINAL_JOB_STATUSES
+        ]
+        if missing:
+            raise HTTPException(404, f"Download history not found: {missing[0]}")
+        if body.delete_files and active:
+            raise HTTPException(409, "Files cannot be deleted while a download is active")
+
+        removed: list[str] = []
+        skipped: list[str] = []
+        if body.delete_files:
+            try:
+                for source_id, entry in entries.items():
+                    entry_removed, entry_skipped = _delete_job_files(entry, settings.media_dir)
+                    removed.extend(entry_removed)
+                    skipped.extend(entry_skipped)
+                    repository.delete_document(source_id)
+            except OSError as exc:
+                raise HTTPException(500, f"Could not delete a local file: {exc}") from exc
+        for source_id in source_ids:
+            repository.delete_download_history(source_id)
+        return {
+            "deleted": source_ids,
+            "count": len(source_ids),
+            "removed_files": removed,
+            "skipped_files": skipped,
+        }
 
     @app.get("/api/library")
     async def library(q: str = "", tag: str = "", charging: bool | None = None):

@@ -14,6 +14,9 @@ def test_job_and_document_round_trip(tmp_path):
         is_charging=True,
     )
     job_id = repo.create_job(item)
+    history = repo.get_download_history("BV1")
+    assert history["job_id"] == job_id
+    assert history["status"] == "queued"
     assert repo.get_job(job_id)["downloaded_at"] is None
     repo.mark_job_downloaded(job_id)
     repo.update_job(job_id, JobStatus.TRANSCRIBING, 0.5, "working")
@@ -21,9 +24,16 @@ def test_job_and_document_round_trip(tmp_path):
     assert job["status"] == "transcribing"
     assert job["downloaded_at"]
     assert job["source"]["source_id"] == "BV1"
+    assert repo.get_download_history("BV1")["status"] == "transcribing"
     repo.save_document(item, {"markdown": "/tmp/BV1.md"})
     assert repo.list_documents(tag="Knowledge", charging=True)[0]["title"] == "Title"
     assert repo.delete_document("BV1") is True
     assert repo.list_documents() == []
     assert repo.delete_job(job_id) is True
     assert repo.get_job(job_id) is None
+    assert repo.get_download_history("BV1") is not None
+    assert repo.delete_download_history("BV1") is True
+    assert repo.list_download_history() == []
+
+    reopened = LibraryRepository(tmp_path / "data.db")
+    assert reopened.list_download_history() == []
