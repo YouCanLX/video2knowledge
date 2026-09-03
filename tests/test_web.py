@@ -83,6 +83,7 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="collapse-all-jobs"' in page.text
     assert 'id="select-visible-jobs"' in page.text
     assert 'id="delete-selected-jobs"' in page.text
+    assert 'id="restart-selected-jobs"' in page.text
     assert 'id="settings-toggle"' in page.text
     assert 'aria-controls="settings-content"' in page.text
     assert 'id="settings-content" hidden' in page.text
@@ -102,13 +103,18 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "data-restart-job" in script.text
     assert "`/api/jobs/${encodeURIComponent(jobId)}/${action}`" in script.text
     assert 'target="_blank" rel="noopener noreferrer"' in script.text
-    assert 'navigator.clipboard.writeText(url)' in script.text
+    assert "navigator.clipboard.writeText(url)" in script.text
     assert '"/api/jobs/batch-delete"' in script.text
+    assert '"/api/jobs/batch-restart"' in script.text
     assert 'requestJson("/api/jobs?limit=5000")' in script.text
     assert 'filter === "running"' in script.text
     assert "trackRequestJobs(progressRequestId, data.job_ids, requestLabel)" in script.text
     assert "renderRequestProgress(data)" in script.text
     assert "REQUEST_IDLE_TIMEOUT_MS = 60 * 60 * 1000" in script.text
+    assert "data-toggle-request" in script.text
+    assert "data-drag-request" in script.text
+    assert 'addEventListener("pointermove", move)' in script.text
+    assert "request.position" in script.text
     assert 'requestJson("/api/download-history?limit=5000")' in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
@@ -139,11 +145,7 @@ def test_bilibili_image_proxy_rejects_non_bilibili_hosts(tmp_path):
 def test_creator_batch_expands_pages_and_removes_duplicate_videos():
     class FakeCreatorProvider:
         async def get_creator_collections(self, creator_id, page, page_size):
-            items = (
-                [{"kind": "season", "id": 10, "title": "Trading course"}]
-                if page == 1
-                else []
-            )
+            items = [{"kind": "season", "id": 10, "title": "Trading course"}] if page == 1 else []
             return {"items": items, "has_more": False}
 
         async def get_collection_videos(self, creator_id, kind, collection_id, page, page_size):
@@ -202,9 +204,7 @@ def test_creator_batch_excludes_deselected_collection_video():
     body = CreatorBatchRequest(
         creator_id=37090048,
         collections=[
-            CollectionSelection(
-                kind="season", id=10, excluded_video_ids=["BV1T64y1Z7WJ"]
-            )
+            CollectionSelection(kind="season", id=10, excluded_video_ids=["BV1T64y1Z7WJ"])
         ],
     )
     expanded = asyncio.run(_expand_creator_batch(FakeCreatorProvider(), body))

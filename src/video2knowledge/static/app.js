@@ -13,6 +13,7 @@ const queueMonthFilter = select("#queue-month-filter");
 const queueDayFilter = select("#queue-day-filter");
 const selectVisibleJobs = select("#select-visible-jobs");
 const selectedJobsCount = select("#selected-jobs-count");
+const restartSelectedJobs = select("#restart-selected-jobs");
 const deleteSelectedJobs = select("#delete-selected-jobs");
 const urlStatus = select("#url-status");
 const creatorStatus = select("#creator-status");
@@ -45,6 +46,7 @@ const trackedRequests = new Map();
 const downloadHistoryGroups = new Map();
 let creatorState = null;
 let lastUserInteraction = Number(localStorage.getItem(REQUEST_LAST_INTERACTION_KEY)) || Date.now();
+let draggingRequestId = null;
 
 function activateAppTab(name, focus = false) {
   const showHistory = name === "history";
@@ -160,32 +162,70 @@ function requestProgressState(request, allJobs) {
 }
 
 function renderRequestProgress(allJobs) {
+  if (draggingRequestId) return;
   let changed = false;
   const cards = [...trackedRequests.values()]
     .sort((left, right) => right.createdAt - left.createdAt)
-    .map((request) => {
+    .map((request, index) => {
       const state = requestProgressState(request, allJobs);
       if (state.complete && !request.completedAt) {
         request.completedAt = Date.now();
         changed = true;
       }
-      return `
-        <article class="request-progress-card ${state.className}" data-request-card="${escapeHtml(request.id)}">
-          <div class="request-progress-heading">
+      const bodyId = `request-progress-body-${index}`;
+      return {
+        positioned: Boolean(request.position),
+        html: `
+        <article class="request-progress-card ${state.className} ${request.collapsed ? "collapsed" : ""}"
+          data-request-card="${escapeHtml(request.id)}">
+          <div class="request-progress-heading" data-drag-request="${escapeHtml(request.id)}">
             <div>
               <small>${escapeHtml(state.kicker)}</small>
               <strong title="${escapeHtml(request.label)}">${escapeHtml(request.label)}</strong>
             </div>
-            <button type="button" class="request-progress-close" data-close-request="${escapeHtml(request.id)}"
-              aria-label="Close ${escapeHtml(request.label)} progress">×</button>
+            <div class="request-progress-controls">
+              <button type="button" class="request-progress-toggle"
+                data-toggle-request="${escapeHtml(request.id)}"
+                aria-expanded="${String(!request.collapsed)}" aria-controls="${bodyId}"
+                aria-label="${request.collapsed ? "Expand" : "Collapse"} ${escapeHtml(request.label)} progress">
+                ${request.collapsed ? "+" : "−"}
+              </button>
+              <button type="button" class="request-progress-close" data-close-request="${escapeHtml(request.id)}"
+                aria-label="Close ${escapeHtml(request.label)} progress">×</button>
+            </div>
           </div>
-          <progress max="100" ${state.percent === null ? "" : `value="${state.percent}"`}></progress>
-          <div class="request-progress-counts">${escapeHtml(state.countsText)}</div>
-          <small>${escapeHtml(state.detail)}</small>
+          <div class="request-progress-body" id="${bodyId}" ${request.collapsed ? "hidden" : ""}>
+            <progress max="100" ${state.percent === null ? "" : `value="${state.percent}"`}></progress>
+            <div class="request-progress-counts">${escapeHtml(state.countsText)}</div>
+            <small>${escapeHtml(state.detail)}</small>
+          </div>
         </article>
-      `;
+      `,
+      };
     });
-  requestProgressStack.innerHTML = cards.join("");
+  requestProgressStack.innerHTML = `
+    <div class="request-progress-dock">
+      ${cards.filter((card) => !card.positioned).map((card) => card.html).join("")}
+    </div>
+    <div class="request-progress-canvas">
+      ${cards.filter((card) => card.positioned).map((card) => card.html).join("")}
+    </div>
+  `;
+  requestProgressStack.querySelectorAll("[data-request-card]").forEach((card) => {
+    const request = trackedRequests.get(card.dataset.requestCard);
+    if (!request) return;
+    applyRequestCardPosition(card, request.position);
+    enableRequestCardDragging(card, request);
+  });
+  requestProgressStack.querySelectorAll("[data-toggle-request]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const request = trackedRequests.get(button.dataset.toggleRequest);
+      if (!request) return;
+      request.collapsed = !request.collapsed;
+      saveTrackedRequests();
+      renderRequestProgress(latestJobs);
+    });
+  });
   requestProgressStack.querySelectorAll("[data-close-request]").forEach((button) => {
     button.addEventListener("click", () => {
       trackedRequests.delete(button.dataset.closeRequest);
@@ -194,6 +234,60 @@ function renderRequestProgress(allJobs) {
     });
   });
   if (changed) saveTrackedRequests();
+}
+
+function applyRequestCardPosition(card, position) {
+  if (!position || !Number.isFinite(Number(position.x)) || !Number.isFinite(Number(position.y))) {
+    return;
+  }
+  card.classList.add("positioned");
+  const maxX = Math.max(8, window.innerWidth - card.offsetWidth - 8);
+  const maxY = Math.max(8, window.innerHeight - card.offsetHeight - 8);
+  card.style.left = `${Math.min(Math.max(8, Number(position.x)), maxX)}px`;
+  card.style.top = `${Math.min(Math.max(8, Number(position.y)), maxY)}px`;
+}
+
+function enableRequestCardDragging(card, request) {
+  const handle = card.querySelector("[data-drag-request]");
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("button")) return;
+    event.preventDefault();
+    noteUserInteraction();
+    draggingRequestId = request.id;
+    const bounds = card.getBoundingClientRect();
+    const offsetX = event.clientX - bounds.left;
+    const offsetY = event.clientY - bounds.top;
+    requestProgressStack.append(card);
+    card.classList.add("positioned", "dragging");
+    card.style.left = `${bounds.left}px`;
+    card.style.top = `${bounds.top}px`;
+    handle.setPointerCapture(event.pointerId);
+
+    const move = (moveEvent) => {
+      const maxX = Math.max(8, window.innerWidth - card.offsetWidth - 8);
+      const maxY = Math.max(8, window.innerHeight - card.offsetHeight - 8);
+      const x = Math.min(Math.max(8, moveEvent.clientX - offsetX), maxX);
+      const y = Math.min(Math.max(8, moveEvent.clientY - offsetY), maxY);
+      card.style.left = `${x}px`;
+      card.style.top = `${y}px`;
+    };
+    const finish = () => {
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", finish);
+      handle.removeEventListener("pointercancel", finish);
+      request.position = {
+        x: Number.parseFloat(card.style.left),
+        y: Number.parseFloat(card.style.top),
+      };
+      draggingRequestId = null;
+      card.classList.remove("dragging");
+      saveTrackedRequests();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", finish);
+    handle.addEventListener("pointercancel", finish);
+  });
 }
 
 function noteUserInteraction() {
@@ -224,6 +318,13 @@ function updateQueueSelectionControls() {
   selectVisibleJobs.checked = visible.length > 0 && selectedVisible.length === visible.length;
   selectVisibleJobs.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visible.length;
   selectedJobsCount.textContent = `${selectedQueueJobs.size} selected`;
+  const failedCount = latestJobs.filter(
+    (job) => job.status === "failed" && selectedQueueJobs.has(job.id),
+  ).length;
+  restartSelectedJobs.disabled = failedCount === 0;
+  restartSelectedJobs.textContent = failedCount > 0
+    ? `Restart failed (${failedCount})`
+    : "Restart failed";
   deleteSelectedJobs.disabled = selectedQueueJobs.size === 0;
 }
 
@@ -1272,13 +1373,7 @@ async function updateJobExecution(jobId, action) {
       { method: "POST" },
     );
     if (action === "restart") {
-      trackedRequests.forEach((request) => {
-        if (request.jobIds?.includes(jobId)) {
-          request.state = "active";
-          request.completedAt = null;
-        }
-      });
-      saveTrackedRequests();
+      reactivateTrackedRequests([jobId]);
     }
     queueStatus.textContent = action === "pause"
       ? (job.status === "paused"
@@ -1288,6 +1383,41 @@ async function updateJobExecution(jobId, action) {
     await Promise.all([pollJobs(), pollDownloadHistory()]);
   } catch (error) {
     queueStatus.textContent = error.message;
+  }
+}
+
+function reactivateTrackedRequests(jobIds) {
+  trackedRequests.forEach((request) => {
+    if (request.jobIds?.some((jobId) => jobIds.includes(jobId))) {
+      request.state = "active";
+      request.completedAt = null;
+    }
+  });
+  saveTrackedRequests();
+}
+
+async function restartSelectedFailedJobs() {
+  const jobIds = latestJobs
+    .filter((job) => job.status === "failed" && selectedQueueJobs.has(job.id))
+    .map((job) => job.id);
+  if (!jobIds.length) return;
+  if (!window.confirm(`Restart ${jobIds.length} selected failed task(s)?`)) return;
+
+  queueStatus.textContent = `Restarting ${jobIds.length} failed task(s)…`;
+  restartSelectedJobs.disabled = true;
+  try {
+    const result = await requestJson("/api/jobs/batch-restart", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ job_ids: jobIds }),
+    });
+    result.restarted.forEach((jobId) => selectedQueueJobs.delete(jobId));
+    reactivateTrackedRequests(result.restarted);
+    queueStatus.textContent = `${result.count} failed task(s) restarted and added to the queue.`;
+    await Promise.all([pollJobs(), pollDownloadHistory()]);
+  } catch (error) {
+    queueStatus.textContent = error.message;
+    updateQueueSelectionControls();
   }
 }
 
@@ -1486,6 +1616,7 @@ selectVisibleJobs.addEventListener("change", () => {
   updateQueueSelectionControls();
 });
 deleteSelectedJobs.addEventListener("click", deleteSelectedJobRecords);
+restartSelectedJobs.addEventListener("click", restartSelectedFailedJobs);
 select("#expand-all-jobs").addEventListener("click", () => {
   jobs.querySelectorAll("[data-queue-date]").forEach((group) => {
     expandedQueueDates.add(group.dataset.queueDate);
