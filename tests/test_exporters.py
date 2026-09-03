@@ -69,12 +69,22 @@ def test_render_outputs_include_timeline_and_enrichment():
 
 def test_render_markdown_escapes_enrichment_list_content():
     doc = document()
-    doc.enrichment.summary = ["First <claim>", "Second & next"]
+    unsafe = 'First & <claim> "quoted" \'single\' </li><li>injected'
+    doc.enrichment.summary = [unsafe]
+    doc.enrichment.insights = [unsafe]
+    doc.enrichment.suggestions = [unsafe]
+    doc.enrichment.questions = [unsafe]
 
     markdown = render_markdown(doc)
 
-    assert ">First &lt;claim&gt;</li>" in markdown
-    assert ">Second &amp; next</li>" in markdown
+    escaped = (
+        "First &amp; &lt;claim&gt; &quot;quoted&quot; &#x27;single&#x27; "
+        "&lt;/li&gt;&lt;li&gt;injected"
+    )
+    assert markdown.count("<ul ") == 4
+    assert markdown.count("<li ") == 4
+    assert markdown.count(f">{escaped}</li>") == 4
+    assert unsafe not in markdown
 
 
 def test_write_bundle_includes_video_creation_metadata(tmp_path):

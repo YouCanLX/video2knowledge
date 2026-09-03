@@ -10,6 +10,11 @@ from .models import KnowledgeDocument, TranscriptSegment
 from .naming import library_filename_stem
 
 
+def escape_html_list_item(value: str) -> str:
+    """Escape enrichment text before placing it inside an HTML list item."""
+    return escape(str(value), quote=True)
+
+
 def format_clock(seconds: float) -> str:
     total_ms = max(0, round(seconds * 1000))
     hours, rem = divmod(total_ms, 3_600_000)
@@ -117,7 +122,8 @@ def render_markdown(document: KnowledgeDocument) -> str:
                 ),
             ]
             parts.extend(
-                f'<li style="margin:0.35em 0;padding-left:0.2em">{escape(value)}</li>'
+                f'<li style="margin:0.35em 0;padding-left:0.2em">'
+                f"{escape_html_list_item(value)}</li>"
                 for value in values
             )
             parts += ["</ul>", "</div>", ""]
