@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from .exporters import write_bundle
@@ -11,6 +14,7 @@ from .ports import SpeechToText, TextEnricher, TextToSpeech, VideoProvider
 from .repository import LibraryRepository
 
 logger = logging.getLogger(__name__)
+PauseCheckpoint = Callable[[JobStatus, float, str], Awaitable[None]]
 MEDIA_SUFFIXES = {
     ".aac",
     ".flac",
@@ -67,25 +71,38 @@ class Pipeline:
         language: str = "zh-CN",
         synthesize: bool = False,
         force_refresh: bool = False,
+        checkpoint: PauseCheckpoint | None = None,
     ) -> dict[str, str]:
         try:
             audio = None if force_refresh else find_cached_media(self.media_dir, item.source_id)
             if audio:
-                self.repository.update_job(
-                    job_id, JobStatus.DOWNLOADING, 0.25, "Using cached audio"
+                await self._set_stage(
+                    job_id,
+                    JobStatus.DOWNLOADING,
+                    0.25,
+                    "Using cached audio",
+                    checkpoint,
                 )
             else:
                 message = "Refreshing audio download" if force_refresh else "Downloading audio"
-                self.repository.update_job(job_id, JobStatus.DOWNLOADING, 0.1, message)
+                await self._set_stage(job_id, JobStatus.DOWNLOADING, 0.1, message, checkpoint)
                 audio = await self.provider.download_audio(
                     item, self.media_dir / item.source_id, force_refresh=force_refresh
                 )
             self.repository.mark_job_downloaded(job_id)
-            self.repository.update_job(job_id, JobStatus.TRANSCRIBING, 0.35, "Transcribing locally")
+            await self._set_stage(
+                job_id,
+                JobStatus.TRANSCRIBING,
+                0.35,
+                "Transcribing locally",
+                checkpoint,
+            )
             segments = await asyncio.to_thread(self.stt.transcribe, audio, language)
             if not segments:
                 raise RuntimeError("The transcription result is empty")
-            self.repository.update_job(job_id, JobStatus.ENRICHING, 0.65, "Generating summary")
+            await self._set_stage(
+                job_id, JobStatus.ENRICHING, 0.65, "Generating summary", checkpoint
+            )
             try:
                 enrichment = await self.enricher.enrich(
                     item.title, "\n".join(s.text for s in segments), language
@@ -103,8 +120,12 @@ class Pipeline:
             output_dir.mkdir(parents=True, exist_ok=True)
             synthesized: Path | None = None
             if synthesize:
-                self.repository.update_job(
-                    job_id, JobStatus.SYNTHESIZING, 0.82, "Synthesizing speech locally"
+                await self._set_stage(
+                    job_id,
+                    JobStatus.SYNTHESIZING,
+                    0.82,
+                    "Synthesizing speech locally",
+                    checkpoint,
                 )
                 synthesized = await asyncio.to_thread(
                     self.tts.synthesize,
@@ -112,6 +133,13 @@ class Pipeline:
                     output_dir / f"{filename_stem}-tts.wav",
                     language,
                 )
+            await self._set_stage(
+                job_id,
+                JobStatus.SYNTHESIZING if synthesize else JobStatus.ENRICHING,
+                0.95,
+                "Writing library files",
+                checkpoint,
+            )
             outputs = {key: str(value) for key, value in write_bundle(document, output_dir).items()}
             outputs["source_media"] = str(audio)
             if synthesized:
@@ -126,6 +154,30 @@ class Pipeline:
             self.repository.update_job(job_id, JobStatus.FAILED, 1, str(exc))
             raise
 
+    async def _set_stage(
+        self,
+        job_id: str,
+        status: JobStatus,
+        progress: float,
+        message: str,
+        checkpoint: PauseCheckpoint | None,
+    ) -> None:
+        self.repository.update_job(job_id, status, progress, message)
+        if checkpoint:
+            await checkpoint(status, progress, message)
+
+
+@dataclass(slots=True)
+class _JobControl:
+    resume_event: asyncio.Event = field(default_factory=asyncio.Event)
+    pause_requested: bool = False
+    resume_status: JobStatus = JobStatus.QUEUED
+    resume_progress: float = 0
+    resume_message: str = "Waiting in serial queue"
+
+    def __post_init__(self) -> None:
+        self.resume_event.set()
+
 
 class SerialJobRunner:
     """One-worker queue: intentionally enforces one download at a time."""
@@ -134,6 +186,7 @@ class SerialJobRunner:
         self.pipeline = pipeline
         self.queue: asyncio.Queue[tuple[str, VideoItem, str, bool, bool]] = asyncio.Queue()
         self._worker: asyncio.Task[None] | None = None
+        self._controls: dict[str, _JobControl] = {}
 
     def start(self) -> None:
         if not self._worker or self._worker.done():
@@ -148,15 +201,99 @@ class SerialJobRunner:
     ) -> str:
         self.start()
         job_id = self.pipeline.repository.create_job(item)
+        self._controls[job_id] = _JobControl()
         await self.queue.put((job_id, item, language, synthesize, force_refresh))
         return job_id
+
+    def pause(self, job_id: str) -> dict:
+        job = self.pipeline.repository.get_job(job_id)
+        if not job:
+            raise KeyError(job_id)
+        status = JobStatus(job["status"])
+        if status in {JobStatus.COMPLETE, JobStatus.FAILED}:
+            raise ValueError("Completed or failed jobs cannot be paused")
+        control = self._controls.get(job_id)
+        if not control:
+            raise ValueError("This job is not active in the current app session")
+        if status in {JobStatus.PAUSED, JobStatus.PAUSING}:
+            return job
+
+        control.resume_status = status
+        control.resume_progress = float(job["progress"])
+        control.resume_message = str(job["message"] or "Waiting in serial queue")
+        control.pause_requested = True
+        control.resume_event.clear()
+        if status == JobStatus.QUEUED:
+            paused_status = JobStatus.PAUSED
+            message = "Paused in serial queue"
+        else:
+            paused_status = JobStatus.PAUSING
+            message = "Pause requested; finishing the current step safely"
+        self.pipeline.repository.update_job(job_id, paused_status, control.resume_progress, message)
+        return self.pipeline.repository.get_job(job_id) or job
+
+    def resume(self, job_id: str) -> dict:
+        job = self.pipeline.repository.get_job(job_id)
+        if not job:
+            raise KeyError(job_id)
+        status = JobStatus(job["status"])
+        if status not in {JobStatus.PAUSED, JobStatus.PAUSING}:
+            raise ValueError("Only paused jobs can be resumed")
+        control = self._controls.get(job_id)
+        if not control:
+            raise ValueError("This paused job belongs to an earlier app session")
+
+        control.pause_requested = False
+        control.resume_event.set()
+        self.pipeline.repository.update_job(
+            job_id,
+            control.resume_status,
+            control.resume_progress,
+            f"Resuming: {control.resume_message}",
+        )
+        return self.pipeline.repository.get_job(job_id) or job
+
+    async def _checkpoint(
+        self,
+        job_id: str,
+        control: _JobControl,
+        status: JobStatus,
+        progress: float,
+        message: str,
+    ) -> None:
+        control.resume_status = status
+        control.resume_progress = progress
+        control.resume_message = message
+        if not control.pause_requested:
+            return
+        self.pipeline.repository.update_job(
+            job_id, JobStatus.PAUSED, progress, f"Paused before: {message}"
+        )
+        await control.resume_event.wait()
+        self.pipeline.repository.update_job(job_id, status, progress, f"Resuming: {message}")
 
     async def _work(self) -> None:
         while True:
             job_id, item, language, synthesize, force_refresh = await self.queue.get()
+            control = self._controls[job_id]
             try:
-                await self.pipeline.run(job_id, item, language, synthesize, force_refresh)
+                await self._checkpoint(
+                    job_id,
+                    control,
+                    JobStatus.QUEUED,
+                    0,
+                    "Waiting in serial queue",
+                )
+                await self.pipeline.run(
+                    job_id,
+                    item,
+                    language,
+                    synthesize,
+                    force_refresh,
+                    checkpoint=partial(self._checkpoint, job_id, control),
+                )
             except Exception:
                 logger.exception("job %s failed", job_id)
             finally:
+                self._controls.pop(job_id, None)
                 self.queue.task_done()

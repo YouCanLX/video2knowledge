@@ -382,6 +382,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "Job not found")
         return job
 
+    @app.post("/api/jobs/{job_id}/pause")
+    async def pause_job(job_id: str):
+        try:
+            return runner.pause(job_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Job not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/api/jobs/{job_id}/resume")
+    async def resume_job(job_id: str):
+        try:
+            return runner.resume(job_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Job not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     def output_path(job_id: str, output_key: str) -> Path:
         job = repository.get_job(job_id)
         if not job:

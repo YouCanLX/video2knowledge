@@ -39,6 +39,24 @@ class FakeTTS:
         return output_path
 
 
+class BlockingProvider(FakeProvider):
+    def __init__(self):
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def download_audio(self, item, output_dir, force_refresh=False):
+        self.started.set()
+        await self.release.wait()
+        return await super().download_audio(item, output_dir, force_refresh)
+
+
+async def wait_for_job_status(repo, job_id, expected):
+    async with asyncio.timeout(1):
+        while repo.get_job(job_id)["status"] != expected:
+            await asyncio.sleep(0.005)
+
+
 def test_serial_runner_never_downloads_concurrently(tmp_path):
     async def scenario():
         provider = FakeProvider()
@@ -66,6 +84,77 @@ def test_serial_runner_never_downloads_concurrently(tmp_path):
             / "UnknownCreator_A_A"
             / "UnknownCreator_A_A.md"
         ).exists()
+        runner._worker.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_runner_pauses_active_job_at_safe_stage_boundary_and_resumes(tmp_path):
+    async def scenario():
+        provider = BlockingProvider()
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            provider,
+            FakeSTT(),
+            FakeLLM(),
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        runner = SerialJobRunner(pipeline)
+        item = VideoItem("bilibili", "PAUSE", "Pause", "https://example.test/pause")
+
+        job_id = await runner.submit(item)
+        await provider.started.wait()
+        paused = runner.pause(job_id)
+        assert paused["status"] == "pausing"
+
+        provider.release.set()
+        await wait_for_job_status(repo, job_id, "paused")
+        assert repo.get_job(job_id)["progress"] == 0.35
+
+        resumed = runner.resume(job_id)
+        assert resumed["status"] == "transcribing"
+        await runner.queue.join()
+        assert repo.get_job(job_id)["status"] == "complete"
+        runner._worker.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_runner_pauses_queued_job_without_blocking_other_job(tmp_path):
+    async def scenario():
+        provider = BlockingProvider()
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            provider,
+            FakeSTT(),
+            FakeLLM(),
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        runner = SerialJobRunner(pipeline)
+        first = await runner.submit(
+            VideoItem("bilibili", "FIRST", "First", "https://example.test/first")
+        )
+        await provider.started.wait()
+        second = await runner.submit(
+            VideoItem("bilibili", "SECOND", "Second", "https://example.test/second")
+        )
+
+        assert runner.pause(second)["status"] == "paused"
+        provider.release.set()
+        await wait_for_job_status(repo, first, "complete")
+        await wait_for_job_status(repo, second, "paused")
+        assert provider.download_count == 1
+
+        runner.resume(second)
+        await runner.queue.join()
+        assert repo.get_job(second)["status"] == "complete"
+        assert provider.download_count == 2
         runner._worker.cancel()
 
     asyncio.run(scenario())

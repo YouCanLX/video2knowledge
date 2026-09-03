@@ -67,6 +67,7 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="queue-creator-filter"' in page.text
     assert 'id="queue-collection-filter"' in page.text
     assert 'id="queue-status-filter"' in page.text
+    assert '<option value="paused">Paused</option>' in page.text
     assert 'id="queue-year-filter"' in page.text
     assert 'id="queue-month-filter"' in page.text
     assert 'id="queue-day-filter"' in page.text
@@ -88,6 +89,9 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "Show in Finder" in script.text
     assert "data-quick-delete-job" in script.text
     assert "data-copy-job-link" in script.text
+    assert "data-pause-job" in script.text
+    assert "data-resume-job" in script.text
+    assert "`/api/jobs/${encodeURIComponent(jobId)}/${action}`" in script.text
     assert 'target="_blank" rel="noopener noreferrer"' in script.text
     assert 'navigator.clipboard.writeText(url)' in script.text
     assert '"/api/jobs/batch-delete"' in script.text
@@ -318,6 +322,32 @@ def test_active_job_cannot_be_deleted(tmp_path):
     response = asyncio.run(scenario())
 
     assert response.status_code == 409
+
+
+def test_queued_job_can_be_paused_and_resumed_through_api(tmp_path, monkeypatch):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        runner = app.state.runner
+        monkeypatch.setattr(runner, "start", lambda: None)
+        job_id = await runner.submit(
+            VideoItem("bilibili", "BV1PAUSE", "Pause", "https://example.test/pause")
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            paused = await client.post(f"/api/jobs/{job_id}/pause")
+            resumed = await client.post(f"/api/jobs/{job_id}/resume")
+            invalid = await client.post(f"/api/jobs/{job_id}/resume")
+            missing = await client.post("/api/jobs/missing/pause")
+        return paused, resumed, invalid, missing
+
+    paused, resumed, invalid, missing = asyncio.run(scenario())
+
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+    assert resumed.status_code == 200
+    assert resumed.json()["status"] == "queued"
+    assert invalid.status_code == 409
+    assert missing.status_code == 404
 
 
 def test_batch_delete_completed_and_failed_jobs(tmp_path):

@@ -110,10 +110,15 @@ function requestProgressState(request, allJobs) {
   }
   const requestJobIds = new Set(request.jobIds);
   const jobsForRequest = allJobs.filter((job) => requestJobIds.has(job.id));
-  const counts = { complete: 0, failed: 0, queued: 0, running: 0 };
+  const counts = { complete: 0, failed: 0, queued: 0, paused: 0, running: 0 };
   jobsForRequest.forEach((job) => {
-    if (["complete", "failed", "queued"].includes(job.status)) counts[job.status] += 1;
-    else counts.running += 1;
+    if (["complete", "failed", "queued", "paused"].includes(job.status)) {
+      counts[job.status] += 1;
+    } else if (job.status === "pausing") {
+      counts.paused += 1;
+    } else {
+      counts.running += 1;
+    }
   });
   const total = request.jobIds.length;
   const finished = counts.complete + counts.failed;
@@ -129,7 +134,7 @@ function requestProgressState(request, allJobs) {
     countsText: `${finished} of ${total} finished · ${percent}%`,
     detail: [
       `${counts.complete} complete`, `${counts.failed} failed`,
-      `${counts.running} running`, `${counts.queued} queued`,
+      `${counts.running} running`, `${counts.queued} queued`, `${counts.paused} paused`,
       unavailable ? `${unavailable} pending status` : "",
     ].filter(Boolean).join(" · "),
     complete,
@@ -380,7 +385,10 @@ function jobCreatedDateParts(value) {
 function jobMatchesStatusFilter(job, filter) {
   if (!filter) return true;
   if (filter === "running") {
-    return !["complete", "failed", "queued"].includes(job.status);
+    return !["complete", "failed", "queued", "paused", "pausing"].includes(job.status);
+  }
+  if (filter === "paused") {
+    return ["paused", "pausing"].includes(job.status);
   }
   return job.status === filter;
 }
@@ -1022,6 +1030,8 @@ async function pollJobs() {
           </details>`
         : "";
       const canDelete = job.status === "complete" || job.status === "failed";
+      const canResume = job.status === "paused" || job.status === "pausing";
+      const canPause = !canDelete && !canResume;
       return `
       <div class="job">
         <div class="job-header">
@@ -1045,6 +1055,11 @@ async function pollJobs() {
               <span class="job-disclosure" aria-hidden="true">${expanded ? "−" : "+"}</span>
             </span>
           </button>
+          ${canDelete ? "" : `<button type="button" class="job-control ${canResume ? "resume" : "pause"}"
+            ${canResume ? `data-resume-job="${escapeHtml(job.id)}"` : `data-pause-job="${escapeHtml(job.id)}"`}
+            title="${canResume ? "Resume processing" : "Pause processing"}"
+            aria-label="${canResume ? "Resume" : "Pause"} ${escapeHtml(job.source.title)}"
+            ${canPause || canResume ? "" : "disabled"}>${canResume ? "Resume" : "Pause"}</button>`}
           <button type="button" class="quick-delete" data-quick-delete-job="${escapeHtml(job.id)}"
             title="Delete history record" aria-label="Delete ${escapeHtml(job.source.title)}"
             ${canDelete ? "" : "disabled"}>×</button>
@@ -1094,6 +1109,12 @@ async function pollJobs() {
     });
     jobs.querySelectorAll("[data-quick-delete-job]").forEach((button) => {
       button.addEventListener("click", () => deleteJob(button.dataset.quickDeleteJob, false));
+    });
+    jobs.querySelectorAll("[data-pause-job]").forEach((button) => {
+      button.addEventListener("click", () => updateJobExecution(button.dataset.pauseJob, "pause"));
+    });
+    jobs.querySelectorAll("[data-resume-job]").forEach((button) => {
+      button.addEventListener("click", () => updateJobExecution(button.dataset.resumeJob, "resume"));
     });
     jobs.querySelectorAll("[data-select-job]").forEach((input) => {
       input.addEventListener("change", () => {
@@ -1183,6 +1204,24 @@ async function copyJobLink(url) {
     queueStatus.textContent = copied
       ? "Video link copied to the clipboard."
       : "Could not copy the video link. Select the URL and copy it manually.";
+  }
+}
+
+async function updateJobExecution(jobId, action) {
+  queueStatus.textContent = action === "pause" ? "Requesting a safe pause…" : "Resuming…";
+  try {
+    const job = await requestJson(
+      `/api/jobs/${encodeURIComponent(jobId)}/${action}`,
+      { method: "POST" },
+    );
+    queueStatus.textContent = action === "pause"
+      ? (job.status === "paused"
+        ? "Task paused. Its completed progress has been kept."
+        : "Pause requested. The current step will finish safely before the task pauses.")
+      : "Task resumed.";
+    await Promise.all([pollJobs(), pollDownloadHistory()]);
+  } catch (error) {
+    queueStatus.textContent = error.message;
   }
 }
 

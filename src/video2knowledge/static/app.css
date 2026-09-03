@@ -486,6 +486,8 @@ main {
 .job-status { background: #e6e8e2; color: var(--muted); font-weight: 700; text-transform: uppercase; }
 .job-status.complete { background: #dcefdc; color: #23642f; }
 .job-status.failed { background: #ffe0dc; color: #8a2d23; }
+.job-status.paused { background: #e6e0f5; color: #553989; }
+.job-status.pausing { background: #efe7d6; color: #75561d; }
 .job-status.downloading,
 .job-status.transcribing,
 .job-status.enriching,
@@ -501,6 +503,15 @@ main {
   font-size: 14px;
   line-height: 1;
 }
+.job-control {
+  min-width: 52px;
+  padding: 5px 7px;
+  border-color: #d1c8a8;
+  background: #fff8df;
+  color: #6c5312;
+  font-size: 9px;
+}
+.job-control.resume { border-color: #b9d4b8; background: #e8f5e7; color: #286534; }
 .bar { height: 7px; margin-top: 6px; overflow: hidden; border-radius: 9px; background: #e6e8e2; }
 .bar i { display: block; height: 100%; background: var(--lime); }
 .job-body { margin-top: 7px; }

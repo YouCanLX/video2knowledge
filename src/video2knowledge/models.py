@@ -9,6 +9,8 @@ from typing import Any
 
 class JobStatus(StrEnum):
     QUEUED = "queued"
+    PAUSING = "pausing"
+    PAUSED = "paused"
     DOWNLOADING = "downloading"
     TRANSCRIBING = "transcribing"
     ENRICHING = "enriching"
