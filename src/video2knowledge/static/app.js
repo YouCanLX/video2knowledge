@@ -1313,16 +1313,20 @@ async function pollJobs() {
     queueCreatorFilter.innerHTML = creators
       .map((creator) => `<option value="${escapeHtml(creator)}">${escapeHtml(creator)}</option>`).join("");
     restoreFilterValues(queueCreatorFilter, selectedCreators);
-    const collections = [...new Set(data.map((job) => job.source.collection_title).filter(Boolean))]
+    const activeCreators = selectedFilterValues(queueCreatorFilter);
+    const collectionJobs = activeCreators.length
+      ? data.filter((job) => activeCreators.includes(job.source.author || "Unknown creator"))
+      : data;
+    const collections = [...new Set(collectionJobs
+      .map((job) => job.source.collection_title).filter(Boolean))]
       .sort((left, right) => left.localeCompare(right));
-    const hasUnassigned = data.some((job) => !job.source.collection_title);
+    const hasUnassigned = collectionJobs.some((job) => !job.source.collection_title);
     queueCollectionFilter.innerHTML = `
       ${collections.map((collection) => `<option value="${escapeHtml(collection)}">${escapeHtml(collection)}</option>`).join("")}
       ${hasUnassigned ? '<option value="__none__">No collection data</option>' : ""}
     `;
     restoreFilterValues(queueCollectionFilter, selectedCollections);
     setDateFilterOptions(data);
-    const activeCreators = selectedFilterValues(queueCreatorFilter);
     const activeCollections = selectedFilterValues(queueCollectionFilter);
     const activeYears = selectedFilterValues(queueYearFilter);
     const activeMonths = selectedFilterValues(queueMonthFilter);

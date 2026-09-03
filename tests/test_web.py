@@ -115,6 +115,8 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'filter === "running"' in script.text
     assert "selectedFilterValues" in script.text
     assert "filters.some" in script.text
+    assert "const collectionJobs = activeCreators.length" in script.text
+    assert "const hasUnassigned = collectionJobs.some" in script.text
     assert "trackRequestJobs(progressRequestId, data.job_ids, requestLabel)" in script.text
     assert "renderRequestProgress(data)" in script.text
     assert "REQUEST_IDLE_TIMEOUT_MS = 60 * 60 * 1000" in script.text
