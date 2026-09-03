@@ -11,23 +11,75 @@ speech and an Apple Music-compatible M4A file.
 > **Project status:** alpha. The core workflow works on Apple Silicon, but APIs and
 > configuration may still change before the first stable release.
 
-## What it does
+## Implemented features
 
-- Accepts a Bilibili video URL or searches videos and creators in the local web UI.
-- Uses [`bili-dl`](https://github.com/war-ning/bili-dl) for authenticated and
+### Video sources and downloads
+
+- ✅ Accepts a Bilibili video URL or searches videos and creators in the local web UI.
+- ✅ Uses [`bili-dl`](https://github.com/war-ning/bili-dl) for authenticated and
   charging-content downloads; falls back to `yt-dlp` when `bili-dl` is not configured.
-- Reuses complete media, transcription, summary, and export results by default and supports
+- ✅ Imports videos in creator-level batches and keeps downloads serial for accounts without
+  Bilibili premium.
+- ✅ Reuses complete media, transcription, summary, and export results by default and supports
   an explicit force-refresh option.
-- Computes SHA-256 after download and stores byte-identical media once, with source-to-asset
+- ✅ Computes SHA-256 after download and stores byte-identical media once, with source-to-asset
   references protecting shared files until their final reference is removed.
-- Transcribes locally through an MLX Audio OpenAI-compatible server.
-- Generates core summaries, further insights, suggestions, and follow-up questions.
-- Stores readable Markdown plus synchronized LRC and machine-readable JSON timelines.
-- Converts Markdown to speech and optionally packages it as AAC/M4A for Apple Music.
-- Keeps downloads serial so accounts without Bilibili premium never start parallel jobs.
+
+### Models and interfaces
+
+- ✅ Separates video providers, speech engines, and LLM enrichment backends behind interfaces
+  so implementations can be replaced independently.
+- ✅ Transcribes locally through an MLX Audio OpenAI-compatible server.
+- ✅ Generates core summaries, further insights, suggestions, and follow-up questions.
+- ✅ Supports Codex CLI and OpenAI-compatible LLM backends such as Ollama.
+- ✅ Checks required runtime services before processing and lets the web UI start, monitor,
+  and stop the local MLX Audio service.
+
+### Speech and media
+
+- ✅ Stores readable Markdown plus synchronized LRC and machine-readable JSON timelines.
+- ✅ Converts Markdown to speech and optionally packages it as AAC/M4A for Apple Music.
+
+### Knowledge and task management
+
+- ✅ Organizes the knowledge library by creator and collection while preserving collection
+  context in exported documents.
+- ✅ Persists download history and request progress in SQLite with status-based filtering.
+- ✅ Supports pausing and resuming queued work, restarting failed jobs individually or in
+  batches, and cleaning up stale terminal records.
+- ✅ Provides interactive queue file controls for opening or revealing generated files and
+  optionally removing their associated local data.
 
 Video2Knowledge does not bypass platform authorization, charging-content access controls,
 or DRM. Download and retain only content you are permitted to use.
+
+## TODO
+
+### Video sources and downloads
+
+- [ ] Improve Bilibili search resilience when public requests trigger risk controls.
+- [ ] Add support for more video providers.
+
+### Models and interfaces
+
+- [ ] Add configurable non-MLX speech backends.
+- [ ] Stabilize the public configuration and API surface for the first non-alpha release.
+
+### Speech and media
+
+- [ ] Support multi-speaker interview transcription, speaker identification, and viewpoint
+  extraction.
+- [ ] Expand speech synthesis and media export configuration.
+
+### Knowledge and task management
+
+- [ ] Restore interrupted in-progress jobs automatically after the service restarts.
+- [ ] Add authentication and authorization before supporting non-local web deployment.
+- [ ] Select a license before the first non-alpha release.
+
+These items describe the current roadmap rather than committed release dates. See
+[`CHANGELOG.md`](CHANGELOG.md) for the features and fixes already delivered by version and
+commit.
 
 ## Requirements
 
@@ -186,6 +238,11 @@ python -m build
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution conventions and
 [`SECURITY.md`](SECURITY.md) for handling credentials and reporting vulnerabilities.
+
+## Changelog
+
+See [`CHANGELOG.md`](CHANGELOG.md) for version-level and commit-level feature, bug-fix,
+performance, documentation, and build history.
 
 ## Known limitations
 

@@ -45,6 +45,8 @@ include = [
   "/tests",
   "/README.md",
   "/README.zh-CN.md",
+  "/CHANGELOG.md",
+  "/CHANGELOG.zh-CN.md",
   "/CONTRIBUTING.md",
   "/SECURITY.md",
   "/config.example.json",

@@ -30,6 +30,8 @@ Keep these conventions:
 - Depend on contracts from `ports.py` in orchestration code.
 - Preserve transcripts when optional enrichment fails.
 - Add tests for behavior changes and update user-facing documentation.
+- Add user-visible features, fixes, and breaking changes to `CHANGELOG.md` and
+  `CHANGELOG.zh-CN.md`, including the commit hash once it is known.
 - Keep source code, messages, and documentation in English.
 
 ## Commit messages
