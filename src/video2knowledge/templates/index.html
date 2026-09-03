@@ -23,7 +23,15 @@
     </div>
 
     <main>
-      <section class="panel" aria-labelledby="add-video-heading">
+      <nav class="app-tabs" role="tablist" aria-label="Video2Knowledge sections">
+        <button type="button" id="add-videos-tab" role="tab" aria-selected="true"
+          aria-controls="add-videos-page">Add Videos</button>
+        <button type="button" id="download-history-tab" role="tab" aria-selected="false"
+          aria-controls="download-history-page">Download History</button>
+      </nav>
+
+      <section class="panel tab-page" id="add-videos-page" role="tabpanel"
+        aria-labelledby="add-videos-tab">
         <h2 id="add-video-heading">Add a Bilibili Video</h2>
         <form class="direct" id="url-form">
           <label class="sr-only" for="video-url">Bilibili video URL</label>
@@ -79,97 +87,107 @@
           <input id="tag-filter" placeholder="Example: AI">
         </div>
         <div id="results"><div class="empty">Search results will appear here</div></div>
-
-        <div class="divider">download history</div>
-        <section class="download-history" aria-labelledby="download-history-heading">
-          <div class="download-history-heading">
-            <div>
-              <h3 id="download-history-heading">Collections &amp; Videos</h3>
-              <small id="download-history-summary">Loading local history…</small>
-            </div>
-            <button type="button" class="secondary" id="refresh-download-history">Refresh</button>
-          </div>
-          <div class="download-history-status" id="download-history-status"
-            role="status" aria-live="polite"></div>
-          <div class="download-history-list" id="download-history-list">
-            <div class="empty">No local download history yet</div>
-          </div>
-        </section>
       </section>
 
-      <aside class="panel queue-panel" aria-labelledby="queue-heading">
-        <button
-          class="queue-heading"
-          id="queue-toggle"
-          type="button"
-          aria-expanded="true"
-          aria-controls="queue-content"
-        >
-          <span>
-            <span class="queue-title" id="queue-heading">Serial Processing Queue</span>
-            <small id="queue-summary">No jobs</small>
-          </span>
-          <span class="queue-toggle-label" aria-hidden="true">Collapse</span>
-        </button>
-        <div class="queue-content" id="queue-content">
-          <div class="queue-toolbar">
-            <label for="queue-creator-filter">Creator</label>
-            <select id="queue-creator-filter">
-              <option value="">All creators</option>
-            </select>
-            <label for="queue-collection-filter">Collection</label>
-            <select id="queue-collection-filter">
-              <option value="">All collections</option>
-            </select>
-            <label for="queue-status-filter">Status</label>
-            <select id="queue-status-filter">
-              <option value="">All statuses</option>
-              <option value="complete">Complete</option>
-              <option value="failed">Failed</option>
-              <option value="running">Running</option>
-              <option value="queued">Queued</option>
-              <option value="paused">Paused</option>
-            </select>
-            <div class="queue-view-actions">
-              <button type="button" class="secondary" id="expand-all-jobs">Expand all</button>
-              <button type="button" class="secondary" id="collapse-all-jobs">Collapse all</button>
+      <section class="tab-page history-page" id="download-history-page" role="tabpanel"
+        aria-labelledby="download-history-tab" hidden>
+        <section class="panel download-history-panel" aria-labelledby="download-history-heading">
+          <div class="download-history-heading-row">
+            <button type="button" class="download-history-heading" id="download-history-toggle"
+              aria-expanded="true" aria-controls="download-history-content">
+              <span>
+                <span class="download-history-title" id="download-history-heading">
+                  Collections &amp; Videos
+                </span>
+                <small id="download-history-summary">Loading local history…</small>
+              </span>
+              <span class="download-history-toggle-label" aria-hidden="true">Collapse</span>
+            </button>
+            <button type="button" class="secondary" id="refresh-download-history">Refresh</button>
+          </div>
+          <div id="download-history-content" class="download-history-content">
+            <div class="download-history-status" id="download-history-status"
+              role="status" aria-live="polite"></div>
+            <div class="download-history-list" id="download-history-list">
+              <div class="empty">No local download history yet</div>
             </div>
           </div>
-          <div class="queue-date-filters" aria-label="Created date filters">
-            <span>Created</span>
-            <label>
-              <span class="sr-only">Created year</span>
-              <select id="queue-year-filter" aria-label="Created year">
-                <option value="">All years</option>
+        </section>
+
+        <aside class="panel queue-panel" aria-labelledby="queue-heading">
+          <button
+            class="queue-heading"
+            id="queue-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="queue-content"
+          >
+            <span>
+              <span class="queue-title" id="queue-heading">Serial Processing Queue</span>
+              <small id="queue-summary">No jobs</small>
+            </span>
+            <span class="queue-toggle-label" aria-hidden="true">Collapse</span>
+          </button>
+          <div class="queue-content" id="queue-content">
+            <div class="queue-toolbar">
+              <label for="queue-creator-filter">Creator</label>
+              <select id="queue-creator-filter">
+                <option value="">All creators</option>
               </select>
-            </label>
-            <label>
-              <span class="sr-only">Created month</span>
-              <select id="queue-month-filter" aria-label="Created month" disabled>
-                <option value="">All months</option>
+              <label for="queue-collection-filter">Collection</label>
+              <select id="queue-collection-filter">
+                <option value="">All collections</option>
               </select>
-            </label>
-            <label>
-              <span class="sr-only">Created day</span>
-              <select id="queue-day-filter" aria-label="Created day" disabled>
-                <option value="">All days</option>
+              <label for="queue-status-filter">Status</label>
+              <select id="queue-status-filter">
+                <option value="">All statuses</option>
+                <option value="complete">Complete</option>
+                <option value="failed">Failed</option>
+                <option value="running">Running</option>
+                <option value="queued">Queued</option>
+                <option value="paused">Paused</option>
               </select>
-            </label>
+              <div class="queue-view-actions">
+                <button type="button" class="secondary" id="expand-all-jobs">Expand all</button>
+                <button type="button" class="secondary" id="collapse-all-jobs">Collapse all</button>
+              </div>
+            </div>
+            <div class="queue-date-filters" aria-label="Created date filters">
+              <span>Created</span>
+              <label>
+                <span class="sr-only">Created year</span>
+                <select id="queue-year-filter" aria-label="Created year">
+                  <option value="">All years</option>
+                </select>
+              </label>
+              <label>
+                <span class="sr-only">Created month</span>
+                <select id="queue-month-filter" aria-label="Created month" disabled>
+                  <option value="">All months</option>
+                </select>
+              </label>
+              <label>
+                <span class="sr-only">Created day</span>
+                <select id="queue-day-filter" aria-label="Created day" disabled>
+                  <option value="">All days</option>
+                </select>
+              </label>
+            </div>
+            <div class="queue-bulk-actions">
+              <label class="queue-select-all">
+                <input type="checkbox" id="select-visible-jobs">
+                Select visible history
+              </label>
+              <span id="selected-jobs-count">0 selected</span>
+              <button type="button" class="danger" id="delete-selected-jobs" disabled>
+                Delete selected
+              </button>
+            </div>
+            <div class="queue-status" id="queue-status" role="status" aria-live="polite"></div>
+            <div id="jobs"><div class="empty">No jobs yet</div></div>
           </div>
-          <div class="queue-bulk-actions">
-            <label class="queue-select-all">
-              <input type="checkbox" id="select-visible-jobs">
-              Select visible history
-            </label>
-            <span id="selected-jobs-count">0 selected</span>
-            <button type="button" class="danger" id="delete-selected-jobs" disabled>
-              Delete selected
-            </button>
-          </div>
-          <div class="queue-status" id="queue-status" role="status" aria-live="polite"></div>
-          <div id="jobs"><div class="empty">No jobs yet</div></div>
-        </div>
-      </aside>
+        </aside>
+      </section>
 
       <section class="panel settings-panel" aria-labelledby="settings-heading">
         <button

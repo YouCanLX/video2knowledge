@@ -24,6 +24,12 @@ const settingsContent = select("#settings-content");
 const downloadHistoryList = select("#download-history-list");
 const downloadHistorySummary = select("#download-history-summary");
 const downloadHistoryStatus = select("#download-history-status");
+const downloadHistoryToggle = select("#download-history-toggle");
+const downloadHistoryContent = select("#download-history-content");
+const addVideosTab = select("#add-videos-tab");
+const downloadHistoryTab = select("#download-history-tab");
+const addVideosPage = select("#add-videos-page");
+const downloadHistoryPage = select("#download-history-page");
 const requestProgressStack = select("#request-progress-stack");
 const isStaticPreview = window.location.protocol === "file:";
 const REQUEST_PROGRESS_STORAGE_KEY = "v2k.request-progress.v2";
@@ -33,11 +39,23 @@ let searchResults = [];
 let latestJobs = [];
 const expandedFileJobs = new Set();
 const expandedQueueJobs = new Set();
+const expandedQueueDates = new Set();
 const selectedQueueJobs = new Set();
 const trackedRequests = new Map();
 const downloadHistoryGroups = new Map();
 let creatorState = null;
 let lastUserInteraction = Number(localStorage.getItem(REQUEST_LAST_INTERACTION_KEY)) || Date.now();
+
+function activateAppTab(name, focus = false) {
+  const showHistory = name === "history";
+  addVideosTab.setAttribute("aria-selected", String(!showHistory));
+  downloadHistoryTab.setAttribute("aria-selected", String(showHistory));
+  addVideosTab.tabIndex = showHistory ? -1 : 0;
+  downloadHistoryTab.tabIndex = showHistory ? 0 : -1;
+  addVideosPage.hidden = showHistory;
+  downloadHistoryPage.hidden = !showHistory;
+  if (focus) (showHistory ? downloadHistoryTab : addVideosTab).focus();
+}
 
 function requestId() {
   return globalThis.crypto?.randomUUID?.()
@@ -380,6 +398,11 @@ async function deleteDownloadHistoryGroup(key, deleteFiles) {
 function jobCreatedDateParts(value) {
   const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? { year: match[1], month: match[2], day: match[3] } : null;
+}
+
+function jobCreatedDateKey(value) {
+  const parts = jobCreatedDateParts(value);
+  return parts ? `${parts.year}-${parts.month}-${parts.day}` : "Unknown date";
 }
 
 function jobMatchesStatusFilter(job, filter) {
@@ -992,7 +1015,7 @@ async function pollJobs() {
     queueSummary.textContent = data.length
       ? `${filteredData.length}${filteredData.length !== data.length ? ` of ${data.length}` : ""} jobs${activeJobs ? ` · ${activeJobs} active` : ""}`
       : "No jobs";
-    jobs.innerHTML = filteredData.length ? filteredData.map((job) => {
+    const renderJob = (job) => {
       const outputEntries = Object.entries(job.outputs || {});
       const expanded = expandedQueueJobs.has(job.id);
       const author = job.source.author || "Unknown creator";
@@ -1030,8 +1053,11 @@ async function pollJobs() {
           </details>`
         : "";
       const canDelete = job.status === "complete" || job.status === "failed";
+      const canRestart = job.status === "failed";
       const canResume = job.status === "paused" || job.status === "pausing";
       const canPause = !canDelete && !canResume;
+      const executionAction = canRestart ? "restart" : (canResume ? "resume" : "pause");
+      const executionLabel = canRestart ? "Restart" : (canResume ? "Resume" : "Pause");
       return `
       <div class="job">
         <div class="job-header">
@@ -1055,11 +1081,12 @@ async function pollJobs() {
               <span class="job-disclosure" aria-hidden="true">${expanded ? "−" : "+"}</span>
             </span>
           </button>
-          ${canDelete ? "" : `<button type="button" class="job-control ${canResume ? "resume" : "pause"}"
-            ${canResume ? `data-resume-job="${escapeHtml(job.id)}"` : `data-pause-job="${escapeHtml(job.id)}"`}
-            title="${canResume ? "Resume processing" : "Pause processing"}"
-            aria-label="${canResume ? "Resume" : "Pause"} ${escapeHtml(job.source.title)}"
-            ${canPause || canResume ? "" : "disabled"}>${canResume ? "Resume" : "Pause"}</button>`}
+          ${job.status === "complete" ? "" : `<button type="button"
+            class="job-control ${executionAction}"
+            data-${executionAction}-job="${escapeHtml(job.id)}"
+            title="${executionLabel} processing"
+            aria-label="${executionLabel} ${escapeHtml(job.source.title)}"
+            ${canPause || canResume || canRestart ? "" : "disabled"}>${executionLabel}</button>`}
           <button type="button" class="quick-delete" data-quick-delete-job="${escapeHtml(job.id)}"
             title="Delete history record" aria-label="Delete ${escapeHtml(job.source.title)}"
             ${canDelete ? "" : "disabled"}>×</button>
@@ -1089,7 +1116,32 @@ async function pollJobs() {
         </div>
       </div>
     `;
+    };
+    const jobsByDate = new Map();
+    filteredData.forEach((job) => {
+      const dateKey = jobCreatedDateKey(job.created_at);
+      if (!jobsByDate.has(dateKey)) jobsByDate.set(dateKey, []);
+      jobsByDate.get(dateKey).push(job);
+    });
+    jobs.innerHTML = filteredData.length ? [...jobsByDate.entries()].map(([date, dateJobs]) => {
+      const active = dateJobs.filter((job) => !["complete", "failed"].includes(job.status)).length;
+      return `
+        <details class="queue-date-group" data-queue-date="${escapeHtml(date)}"
+          ${expandedQueueDates.has(date) ? "open" : ""}>
+          <summary>
+            <span>${escapeHtml(date)}</span>
+            <small>${dateJobs.length} job${dateJobs.length === 1 ? "" : "s"}${active ? ` · ${active} active` : ""}</small>
+          </summary>
+          <div class="queue-date-jobs">${dateJobs.map(renderJob).join("")}</div>
+        </details>
+      `;
     }).join("") : '<div class="empty">No jobs match the current filters</div>';
+    jobs.querySelectorAll("[data-queue-date]").forEach((group) => {
+      group.addEventListener("toggle", () => {
+        if (group.open) expandedQueueDates.add(group.dataset.queueDate);
+        else expandedQueueDates.delete(group.dataset.queueDate);
+      });
+    });
     jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
       button.addEventListener("click", () => {
         const jobId = button.dataset.toggleJob;
@@ -1115,6 +1167,9 @@ async function pollJobs() {
     });
     jobs.querySelectorAll("[data-resume-job]").forEach((button) => {
       button.addEventListener("click", () => updateJobExecution(button.dataset.resumeJob, "resume"));
+    });
+    jobs.querySelectorAll("[data-restart-job]").forEach((button) => {
+      button.addEventListener("click", () => updateJobExecution(button.dataset.restartJob, "restart"));
     });
     jobs.querySelectorAll("[data-select-job]").forEach((input) => {
       input.addEventListener("change", () => {
@@ -1208,17 +1263,28 @@ async function copyJobLink(url) {
 }
 
 async function updateJobExecution(jobId, action) {
-  queueStatus.textContent = action === "pause" ? "Requesting a safe pause…" : "Resuming…";
+  queueStatus.textContent = action === "pause"
+    ? "Requesting a safe pause…"
+    : (action === "restart" ? "Restarting failed task…" : "Resuming…");
   try {
     const job = await requestJson(
       `/api/jobs/${encodeURIComponent(jobId)}/${action}`,
       { method: "POST" },
     );
+    if (action === "restart") {
+      trackedRequests.forEach((request) => {
+        if (request.jobIds?.includes(jobId)) {
+          request.state = "active";
+          request.completedAt = null;
+        }
+      });
+      saveTrackedRequests();
+    }
     queueStatus.textContent = action === "pause"
       ? (job.status === "paused"
         ? "Task paused. Its completed progress has been kept."
         : "Pause requested. The current step will finish safely before the task pauses.")
-      : "Task resumed.";
+      : (action === "restart" ? "Failed task restarted and added to the queue." : "Task resumed.");
     await Promise.all([pollJobs(), pollDownloadHistory()]);
   } catch (error) {
     queueStatus.textContent = error.message;
@@ -1377,6 +1443,21 @@ select("#mlx-stop").addEventListener("click", async () => {
 select("#charging-only").addEventListener("change", renderResults);
 select("#tag-filter").addEventListener("input", renderResults);
 select("#refresh-download-history").addEventListener("click", pollDownloadHistory);
+addVideosTab.addEventListener("click", () => activateAppTab("add"));
+downloadHistoryTab.addEventListener("click", () => activateAppTab("history"));
+[addVideosTab, downloadHistoryTab].forEach((tab) => {
+  tab.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    activateAppTab(tab === addVideosTab ? "history" : "add", true);
+  });
+});
+downloadHistoryToggle.addEventListener("click", () => {
+  const expanded = downloadHistoryToggle.getAttribute("aria-expanded") === "true";
+  downloadHistoryToggle.setAttribute("aria-expanded", String(!expanded));
+  downloadHistoryContent.hidden = expanded;
+  select(".download-history-toggle-label").textContent = expanded ? "Expand" : "Collapse";
+});
 queueToggle.addEventListener("click", () => {
   const expanded = queueToggle.getAttribute("aria-expanded") === "true";
   queueToggle.setAttribute("aria-expanded", String(!expanded));
@@ -1406,12 +1487,16 @@ selectVisibleJobs.addEventListener("change", () => {
 });
 deleteSelectedJobs.addEventListener("click", deleteSelectedJobRecords);
 select("#expand-all-jobs").addEventListener("click", () => {
+  jobs.querySelectorAll("[data-queue-date]").forEach((group) => {
+    expandedQueueDates.add(group.dataset.queueDate);
+  });
   jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
     expandedQueueJobs.add(button.dataset.toggleJob);
   });
   pollJobs();
 });
 select("#collapse-all-jobs").addEventListener("click", () => {
+  expandedQueueDates.clear();
   jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
     expandedQueueJobs.delete(button.dataset.toggleJob);
   });
@@ -1431,6 +1516,7 @@ select("#login").addEventListener("click", async () => {
     urlStatus.textContent = error.message;
   }
 });
+activateAppTab("add");
 
 if (isStaticPreview) {
   select("#preview-warning").hidden = false;

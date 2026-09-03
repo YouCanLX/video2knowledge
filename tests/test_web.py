@@ -61,6 +61,14 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "Video2Knowledge" in page.text
     assert 'id="force-refresh"' in page.text
     assert 'id="creator-form"' in page.text
+    assert 'id="add-videos-tab"' in page.text
+    assert 'id="download-history-tab"' in page.text
+    assert 'id="add-videos-page"' in page.text
+    assert 'id="download-history-page"' in page.text
+    assert 'id="download-history-page" role="tabpanel"' in page.text
+    assert 'aria-labelledby="download-history-tab" hidden' in page.text
+    assert 'id="download-history-toggle"' in page.text
+    assert 'aria-controls="download-history-content"' in page.text
     assert 'id="queue-toggle"' in page.text
     assert 'aria-controls="queue-content"' in page.text
     assert 'id="queue-summary"' in page.text
@@ -91,6 +99,7 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "data-copy-job-link" in script.text
     assert "data-pause-job" in script.text
     assert "data-resume-job" in script.text
+    assert "data-restart-job" in script.text
     assert "`/api/jobs/${encodeURIComponent(jobId)}/${action}`" in script.text
     assert 'target="_blank" rel="noopener noreferrer"' in script.text
     assert 'navigator.clipboard.writeText(url)' in script.text
@@ -105,7 +114,12 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'fileList.matches(":hover")' in script.text
     assert 'data-batch-scope="all-collections"' in script.text
     assert "data-more-collections" in script.text
+    assert "activateAppTab" in script.text
+    assert "expandedQueueDates" in script.text
+    assert "data-queue-date" in script.text
+    assert "jobsByDate" in script.text
     assert 'window.location.protocol === "file:"' in script.text
+    assert page.text.index('id="download-history-list"') < page.text.index('id="queue-toggle"')
 
 
 def test_bilibili_image_proxy_rejects_non_bilibili_hosts(tmp_path):
@@ -346,6 +360,34 @@ def test_queued_job_can_be_paused_and_resumed_through_api(tmp_path, monkeypatch)
     assert paused.json()["status"] == "paused"
     assert resumed.status_code == 200
     assert resumed.json()["status"] == "queued"
+    assert invalid.status_code == 409
+    assert missing.status_code == 404
+
+
+def test_failed_job_can_be_restarted_through_api(tmp_path, monkeypatch):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        runner = app.state.runner
+        monkeypatch.setattr(runner, "start", lambda: None)
+        item = VideoItem("bilibili", "BV1RESTART", "Restart", "https://example.test/restart")
+        job_id = runner.pipeline.repository.create_job(
+            item, "en-US", synthesize=True, force_refresh=True
+        )
+        runner.pipeline.repository.update_job(job_id, JobStatus.FAILED, 1, "failed")
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            restarted = await client.post(f"/api/jobs/{job_id}/restart")
+            invalid = await client.post(f"/api/jobs/{job_id}/restart")
+            missing = await client.post("/api/jobs/missing/restart")
+        return restarted, invalid, missing
+
+    restarted, invalid, missing = asyncio.run(scenario())
+
+    assert restarted.status_code == 202
+    assert restarted.json()["status"] == "queued"
+    assert restarted.json()["language"] == "en-US"
+    assert restarted.json()["synthesize"] is True
+    assert restarted.json()["force_refresh"] is True
     assert invalid.status_code == 409
     assert missing.status_code == 404
 
