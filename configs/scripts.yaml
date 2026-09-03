@@ -1,0 +1,28 @@
+# Shared configuration for scripts/build_env.sh and scripts/serve.sh.
+# Paths are resolved relative to the repository root.
+
+# Supported values: uv, conda, venv.
+environment_manager: uv
+python_version: "3.12"
+
+# uv/venv settings. Conda uses conda_environment instead.
+virtualenv_dir: .venv
+conda_environment: video2knowledge
+
+# Comma-separated project extras from pyproject.toml.
+install_extras: bilibili,audio,dev
+install_mlx: true
+
+# Optional local downloader checkout.
+install_bili_dl: true
+bili_dl_repository: https://github.com/war-ning/bili-dl.git
+bili_dl_dir: vendor/bili-dl
+
+# Initialize the application's runtime data after installing dependencies.
+initialize_app: true
+data_dir: video2knowledge-data
+
+# GUI server settings.
+gui_host: 127.0.0.1
+gui_port: 8765
+gui_reload: false
