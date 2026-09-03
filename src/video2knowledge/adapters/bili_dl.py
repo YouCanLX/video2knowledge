@@ -4,7 +4,14 @@ import sys
 from pathlib import Path
 
 from ..models import VideoItem
-from .bilibili import BilibiliProvider
+from .bilibili import (
+    BilibiliProvider,
+    _archive_to_video,
+    _collections_page_payload,
+    _image_url,
+    _page_payload,
+    _uploads_page_payload,
+)
 
 
 class BiliDlProvider(BilibiliProvider):
@@ -65,6 +72,94 @@ class BiliDlProvider(BilibiliProvider):
                 or rights.get("is_chargeable_season")
             ),
         )
+
+    async def get_creator(self, creator_id: int) -> dict[str, str | int]:
+        from bili_dl.api.client import with_risk_retry
+        from bilibili_api.user import User
+
+        _, _, client = self._native_services()
+        await client.throttle()
+        info = await with_risk_retry(
+            lambda: User(uid=creator_id, credential=client.credential).get_user_info(),
+            op_name="UP 主资料",
+        )
+        return {
+            "id": creator_id,
+            "name": str(info.get("name", f"UP {creator_id}")),
+            "avatar": _image_url(str(info.get("face", ""))),
+            "description": str(info.get("sign", "")),
+        }
+
+    async def get_creator_collections(
+        self, creator_id: int, page: int = 1, page_size: int = 8
+    ) -> dict:
+        from bili_dl.api.client import with_risk_retry
+        from bilibili_api.user import User
+
+        _, _, client = self._native_services()
+        await client.throttle()
+        data = await with_risk_retry(
+            lambda: User(uid=creator_id, credential=client.credential).get_channel_list(
+                pn=page, ps=page_size
+            ),
+            op_name="合集列表",
+        )
+        return _collections_page_payload(data, page, page_size)
+
+    async def get_creator_videos(self, creator_id: int, page: int = 1, page_size: int = 12) -> dict:
+        from bili_dl.api.client import with_risk_retry
+        from bilibili_api.user import User
+
+        _, _, client = self._native_services()
+        await client.throttle()
+        data = await with_risk_retry(
+            lambda: User(uid=creator_id, credential=client.credential).get_videos(
+                pn=page, ps=page_size
+            ),
+            op_name="投稿列表",
+        )
+        return _uploads_page_payload(data, creator_id, page, page_size)
+
+    async def get_collection_videos(
+        self,
+        creator_id: int,
+        collection_kind: str,
+        collection_id: int,
+        page: int = 1,
+        page_size: int = 12,
+    ) -> dict:
+        from bili_dl.api.client import with_risk_retry
+        from bilibili_api.channel_series import ChannelOrder
+        from bilibili_api.user import User
+
+        _, _, client = self._native_services()
+        user = User(uid=creator_id, credential=client.credential)
+        await client.throttle()
+        if collection_kind == "season":
+            data = await with_risk_retry(
+                lambda: user.get_channel_videos_season(
+                    sid=collection_id,
+                    sort=ChannelOrder.DEFAULT,
+                    pn=page,
+                    ps=page_size,
+                ),
+                op_name="合集视频",
+            )
+        elif collection_kind == "series":
+            data = await with_risk_retry(
+                lambda: user.get_channel_videos_series(
+                    sid=collection_id,
+                    sort=ChannelOrder.CHANGE,
+                    pn=page,
+                    ps=page_size,
+                ),
+                op_name="系列视频",
+            )
+        else:
+            raise ValueError("Unknown Bilibili collection kind")
+        items = [_archive_to_video(row, creator_id) for row in data.get("archives") or []]
+        total = int((data.get("page") or {}).get("total", len(items)))
+        return _page_payload(items, page, page_size, total)
 
     async def download_audio(
         self, item: VideoItem, output_dir: Path, force_refresh: bool = False

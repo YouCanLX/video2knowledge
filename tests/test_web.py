@@ -6,18 +6,30 @@ import pytest
 import video2knowledge.web as web_module
 from video2knowledge.config import Settings
 from video2knowledge.models import JobStatus, VideoItem
-from video2knowledge.urls import extract_bilibili_bvid
-from video2knowledge.web import create_app
+from video2knowledge.urls import extract_bilibili_bvid, extract_bilibili_creator_id
+from video2knowledge.web import CreatorBatchRequest, _expand_creator_batch, create_app
 
 
 def test_extract_bilibili_bvid_from_video_url():
-    assert extract_bilibili_bvid("https://www.bilibili.com/video/BV1muzGBGEee") == "BV1muzGBGEee"
+    assert extract_bilibili_bvid("https://www.bilibili.com/video/BV1T64y1Z7WJ") == "BV1T64y1Z7WJ"
 
 
 @pytest.mark.parametrize(
     "url",
     [
-        "https://example.com/video/BV1muzGBGEee",
+        "https://space.bilibili.com/37090048",
+        "https://space.bilibili.com/37090048/lists",
+        "https://space.bilibili.com/37090048/upload/video",
+    ],
+)
+def test_extract_bilibili_creator_id(url):
+    assert extract_bilibili_creator_id(url) == 37090048
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/video/BV1T64y1Z7WJ",
         "https://www.bilibili.com/video/not-a-bvid",
         "javascript:alert(1)",
     ],
@@ -43,12 +55,74 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert page.status_code == 200
     assert "Video2Knowledge" in page.text
     assert 'id="force-refresh"' in page.text
+    assert 'id="creator-form"' in page.text
+    assert 'href="../static/app.css"' in page.text
+    assert 'id="preview-warning"' in page.text
     assert stylesheet.status_code == 200
     assert script.status_code == 200
     assert "Open File" in script.text
     assert "Show in Finder" in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
+    assert 'data-batch-scope="all-collections"' in script.text
+    assert "data-more-collections" in script.text
+    assert 'window.location.protocol === "file:"' in script.text
+
+
+def test_bilibili_image_proxy_rejects_non_bilibili_hosts(tmp_path):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get(
+                "/api/bilibili/image", params={"url": "https://example.com/image.jpg"}
+            )
+
+    response = asyncio.run(scenario())
+
+    assert response.status_code == 422
+
+
+def test_creator_batch_expands_pages_and_removes_duplicate_videos():
+    class FakeCreatorProvider:
+        async def get_creator_collections(self, creator_id, page, page_size):
+            items = [{"kind": "season", "id": 10}] if page == 1 else []
+            return {"items": items, "has_more": False}
+
+        async def get_collection_videos(self, creator_id, kind, collection_id, page, page_size):
+            rows = {
+                1: [video("BV1T64y1Z7WJ", "First"), video("BV1rP4y117ap", "Second")],
+                2: [video("BV1rP4y117ap", "Second")],
+            }
+            return {"items": rows.get(page, []), "has_more": page == 1}
+
+        async def get_creator(self, creator_id):
+            return {"id": creator_id, "name": "Creator"}
+
+    def video(source_id, title):
+        return VideoItem(
+            "bilibili", source_id, title, f"https://example.test/{source_id}"
+        ).to_dict()
+
+    body = CreatorBatchRequest(
+        creator_id=37090048,
+        all_collections=True,
+        videos=[
+            VideoItem(
+                "bilibili",
+                "BV1T64y1Z7WJ",
+                "Chosen",
+                "https://www.bilibili.com/video/BV1T64y1Z7WJ",
+            )
+        ],
+    )
+    expanded = asyncio.run(_expand_creator_batch(FakeCreatorProvider(), body))
+
+    assert {item.source_id for item in expanded} == {
+        "BV1T64y1Z7WJ",
+        "BV1rP4y117ap",
+    }
+    assert all(item.author == "Creator" for item in expanded)
 
 
 def test_runtime_settings_are_exposed_and_persisted(tmp_path):

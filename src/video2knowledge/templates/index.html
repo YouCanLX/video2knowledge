@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Video2Knowledge</title>
-    <link rel="stylesheet" href="/static/app.css">
-    <script src="/static/app.js" defer></script>
+    <link rel="stylesheet" href="../static/app.css">
+    <script src="../static/app.js" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -15,6 +15,12 @@
       </div>
       <button class="secondary" id="login" type="button">QR Login</button>
     </header>
+
+    <div class="preview-warning" id="preview-warning" role="alert" hidden>
+      <strong>Static preview only.</strong>
+      The design is available here, but Bilibili loading and processing require the local app.
+      Run <code>v2k serve</code>, then open <code>http://127.0.0.1:8765</code>.
+    </div>
 
     <main>
       <section class="panel" aria-labelledby="add-video-heading">
@@ -36,6 +42,24 @@
           Force re-download cached video
         </label>
         <div class="direct-status" id="url-status" role="status" aria-live="polite"></div>
+
+        <div class="divider">or import a creator</div>
+        <form class="direct" id="creator-form">
+          <label class="sr-only" for="creator-url">Bilibili creator homepage URL</label>
+          <input
+            id="creator-url"
+            type="url"
+            placeholder="Paste a creator homepage, lists, or uploads URL"
+            autocomplete="url"
+            required
+          >
+          <button type="submit">Browse Creator</button>
+        </form>
+        <div class="direct-status" id="creator-status" role="status" aria-live="polite"></div>
+
+        <section class="creator-browser" id="creator-browser" aria-live="polite" hidden>
+          <div id="creator-content"></div>
+        </section>
 
         <div class="divider">or search</div>
         <form class="search" id="search-form">
