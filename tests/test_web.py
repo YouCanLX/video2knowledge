@@ -5,12 +5,14 @@ import pytest
 
 import video2knowledge.web as web_module
 from video2knowledge.config import Settings
+from video2knowledge.mlx_service import MlxServiceStatus
 from video2knowledge.models import JobStatus, VideoItem
 from video2knowledge.urls import extract_bilibili_bvid, extract_bilibili_creator_id
 from video2knowledge.web import (
     CollectionSelection,
     CreatorBatchRequest,
     _expand_creator_batch,
+    _runtime_preflight,
     create_app,
 )
 
@@ -88,6 +90,9 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'aria-controls="settings-content"' in page.text
     assert 'id="settings-content" hidden' in page.text
     assert 'id="request-progress-stack"' in page.text
+    assert 'id="preflight-dialog"' in page.text
+    assert 'id="preflight-checks"' in page.text
+    assert 'id="preflight-continue"' in page.text
     assert 'id="download-history-list"' in page.text
     assert 'id="refresh-download-history"' in page.text
     assert 'href="../static/app.css"' in page.text
@@ -267,6 +272,117 @@ def test_mlx_status_and_invalid_start_command(tmp_path, monkeypatch):
     assert status.json()["state"] == "stopped"
     assert start.status_code == 400
     assert "executable was not found" in start.json()["detail"]
+
+
+def test_job_list_marks_only_current_runner_jobs_as_active(tmp_path, monkeypatch):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        runner = app.state.runner
+        repo = runner.pipeline.repository
+        monkeypatch.setattr(runner, "start", lambda: None)
+        stale = repo.create_job(
+            VideoItem("bilibili", "BV1STALE", "Stale", "https://example.test/stale")
+        )
+        live = await runner.submit(
+            VideoItem("bilibili", "BV1LIVE", "Live", "https://example.test/live")
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/api/jobs")
+        return response, stale, live
+
+    response, stale, live = asyncio.run(scenario())
+    jobs_by_id = {job["id"]: job for job in response.json()}
+
+    assert response.status_code == 200
+    assert jobs_by_id[stale]["session_active"] is False
+    assert jobs_by_id[live]["session_active"] is True
+
+
+def test_runtime_preflight_reports_each_required_service(tmp_path, monkeypatch):
+    async def ready_llm(_settings):
+        return {
+            "key": "llm",
+            "label": "Codex CLI",
+            "ready": True,
+            "message": "ready",
+        }
+
+    async def ready_mlx():
+        return MlxServiceStatus(
+            state="running",
+            reachable=True,
+            managed=False,
+            pid=None,
+            command="mlx_audio.server",
+            base_url="http://127.0.0.1:8000",
+            message="ready",
+            log_tail="",
+        )
+
+    async def scenario():
+        settings = Settings.load(tmp_path)
+        app = create_app(settings)
+        monkeypatch.setattr(web_module, "_llm_preflight", ready_llm)
+        monkeypatch.setattr(web_module.importlib.util, "find_spec", lambda _name: object())
+        monkeypatch.setattr(app.state.mlx_manager, "status", ready_mlx)
+        direct = await _runtime_preflight(settings, app.state.mlx_manager, synthesize=True)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            endpoint = await client.get("/api/runtime/preflight?synthesize=true")
+        return direct, endpoint
+
+    direct, endpoint = asyncio.run(scenario())
+
+    assert direct["ready"] is True
+    assert [check["key"] for check in direct["checks"]] == [
+        "transcription",
+        "audio_decoder",
+        "llm",
+        "speech_synthesis",
+    ]
+    assert endpoint.status_code == 200
+    assert endpoint.json()["ready"] is True
+
+
+def test_runtime_preflight_warns_when_services_are_unavailable(tmp_path, monkeypatch):
+    async def missing_llm(_settings):
+        return {
+            "key": "llm",
+            "label": "Codex CLI",
+            "ready": False,
+            "message": "Codex CLI was not found.",
+        }
+
+    async def stopped_mlx():
+        return MlxServiceStatus(
+            state="stopped",
+            reachable=False,
+            managed=False,
+            pid=None,
+            command="mlx_audio.server",
+            base_url="http://127.0.0.1:8000",
+            message="stopped",
+            log_tail="",
+        )
+
+    async def scenario():
+        settings = Settings.load(tmp_path)
+        app = create_app(settings)
+        monkeypatch.setattr(web_module, "_llm_preflight", missing_llm)
+        monkeypatch.setattr(web_module.importlib.util, "find_spec", lambda _name: None)
+        monkeypatch.setattr(app.state.mlx_manager, "status", stopped_mlx)
+        return await _runtime_preflight(settings, app.state.mlx_manager)
+
+    report = asyncio.run(scenario())
+
+    assert report["ready"] is False
+    assert all(check["ready"] is False for check in report["checks"])
+    assert {check["key"] for check in report["checks"]} == {
+        "transcription",
+        "audio_decoder",
+        "llm",
+    }
 
 
 def test_delete_job_record_keeps_files(tmp_path):

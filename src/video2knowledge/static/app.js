@@ -32,6 +32,7 @@ const downloadHistoryTab = select("#download-history-tab");
 const addVideosPage = select("#add-videos-page");
 const downloadHistoryPage = select("#download-history-page");
 const requestProgressStack = select("#request-progress-stack");
+const preflightDialog = select("#preflight-dialog");
 const isStaticPreview = window.location.protocol === "file:";
 const REQUEST_PROGRESS_STORAGE_KEY = "v2k.request-progress.v2";
 const REQUEST_LAST_INTERACTION_KEY = "v2k.request-progress.last-interaction";
@@ -47,6 +48,62 @@ const downloadHistoryGroups = new Map();
 let creatorState = null;
 let lastUserInteraction = Number(localStorage.getItem(REQUEST_LAST_INTERACTION_KEY)) || Date.now();
 let draggingRequestId = null;
+let processingPreflightActive = false;
+let jobsPollingActive = false;
+let jobPollTimer = null;
+let historyPollTimer = null;
+let mlxPollTimer = null;
+
+function jobNeedsPolling(job) {
+  return Boolean(job.session_active)
+    && !["complete", "failed", "paused"].includes(job.status);
+}
+
+function scheduleJobPolling() {
+  clearTimeout(jobPollTimer);
+  jobPollTimer = null;
+  if (!document.hidden && jobsPollingActive) {
+    jobPollTimer = setTimeout(pollJobs, 2500);
+  }
+}
+
+function scheduleHistoryPolling() {
+  clearTimeout(historyPollTimer);
+  historyPollTimer = null;
+  if (!document.hidden && jobsPollingActive && !downloadHistoryPage.hidden) {
+    historyPollTimer = setTimeout(pollDownloadHistory, 10000);
+  }
+}
+
+function scheduleMlxPolling(status) {
+  clearTimeout(mlxPollTimer);
+  mlxPollTimer = null;
+  const shouldPoll = status?.state === "starting";
+  if (!document.hidden && shouldPoll) {
+    mlxPollTimer = setTimeout(pollMlxStatus, status.state === "starting" ? 2500 : 10000);
+  }
+}
+
+function stopNetworkPolling() {
+  clearTimeout(jobPollTimer);
+  clearTimeout(historyPollTimer);
+  clearTimeout(mlxPollTimer);
+  jobPollTimer = null;
+  historyPollTimer = null;
+  mlxPollTimer = null;
+}
+
+let lastNetworkRefreshAt = 0;
+
+function refreshNetworkState(force = false) {
+  if (document.hidden) return;
+  const now = Date.now();
+  if (!force && now - lastNetworkRefreshAt < 750) return;
+  lastNetworkRefreshAt = now;
+  pollJobs();
+  pollMlxStatus();
+  if (!downloadHistoryPage.hidden) pollDownloadHistory();
+}
 
 function activateAppTab(name, focus = false) {
   const showHistory = name === "history";
@@ -62,6 +119,71 @@ function activateAppTab(name, focus = false) {
 function requestId() {
   return globalThis.crypto?.randomUUID?.()
     || `request-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function openRuntimeSettings() {
+  settingsToggle.setAttribute("aria-expanded", "true");
+  settingsContent.hidden = false;
+  select(".settings-toggle-label").textContent = "Collapse";
+  settingsToggle.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function showPreflightConfirmation(report) {
+  select("#preflight-checks").innerHTML = report.checks.map((check) => `
+    <div class="preflight-check ${check.ready ? "ready" : "unready"}">
+      <span class="preflight-check-state" aria-hidden="true">${check.ready ? "✓" : "!"}</span>
+      <strong>${escapeHtml(check.label)}</strong>
+      <small>${escapeHtml(check.message)}</small>
+    </div>
+  `).join("");
+  preflightDialog.showModal();
+  return new Promise((resolve) => {
+    const finish = (decision) => {
+      preflightDialog.close();
+      select("#preflight-cancel").removeEventListener("click", cancel);
+      select("#preflight-settings").removeEventListener("click", review);
+      select("#preflight-continue").removeEventListener("click", continueAnyway);
+      preflightDialog.removeEventListener("cancel", cancelDialog);
+      resolve(decision);
+    };
+    const cancel = () => finish("cancel");
+    const review = () => finish("settings");
+    const continueAnyway = () => finish("continue");
+    const cancelDialog = (event) => {
+      event.preventDefault();
+      finish("cancel");
+    };
+    select("#preflight-cancel").addEventListener("click", cancel);
+    select("#preflight-settings").addEventListener("click", review);
+    select("#preflight-continue").addEventListener("click", continueAnyway);
+    preflightDialog.addEventListener("cancel", cancelDialog);
+  });
+}
+
+async function confirmProcessingServices(synthesize = false) {
+  if (processingPreflightActive) return false;
+  processingPreflightActive = true;
+  try {
+    let report;
+    try {
+      report = await requestJson(`/api/runtime/preflight?synthesize=${String(synthesize)}`);
+    } catch (error) {
+      report = {
+        ready: false,
+        checks: [{
+          label: "Readiness check",
+          ready: false,
+          message: error.message,
+        }],
+      };
+    }
+    if (report.ready) return true;
+    const decision = await showPreflightConfirmation(report);
+    if (decision === "settings") openRuntimeSettings();
+    return decision === "continue";
+  } finally {
+    processingPreflightActive = false;
+  }
 }
 
 function saveTrackedRequests() {
@@ -616,7 +738,14 @@ function renderVideos() {
     </article>
   `).join("");
   results.querySelectorAll("[data-video-index]").forEach((button) => {
-    button.addEventListener("click", () => submitVideo(filtered[Number(button.dataset.videoIndex)]));
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        await submitVideo(filtered[Number(button.dataset.videoIndex)]);
+      } finally {
+        button.disabled = false;
+      }
+    });
   });
 }
 
@@ -874,6 +1003,14 @@ async function submitCreatorBatch(scope) {
     if (!window.confirm(`Add ${label} to the serial processing queue?`)) return;
   }
   state.batching = true;
+  creatorStatus.textContent = "Checking processing services…";
+  renderCreatorBrowser();
+  if (!await confirmProcessingServices(payload.synthesize)) {
+    creatorStatus.textContent = "Request cancelled. Make the processing services ready, then try again.";
+    state.batching = false;
+    renderCreatorBrowser();
+    return;
+  }
   creatorStatus.textContent = "Expanding the selection across all pages…";
   const requestLabel = `${state.creator.name} · ${scope === "all-collections" ? "all collections" : scope === "all-uploads" ? "all uploads" : "selected videos"}`;
   const progressRequestId = beginRequestProgress(
@@ -1029,9 +1166,15 @@ select("#url-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.submitter;
   button.disabled = true;
-  urlStatus.textContent = "Resolving video…";
-  const progressRequestId = beginRequestProgress("Bilibili video", "Resolving video details…");
+  let progressRequestId = null;
   try {
+    urlStatus.textContent = "Checking processing services…";
+    if (!await confirmProcessingServices(false)) {
+      urlStatus.textContent = "Request cancelled. Make the processing services ready, then try again.";
+      return;
+    }
+    urlStatus.textContent = "Resolving video…";
+    progressRequestId = beginRequestProgress("Bilibili video", "Resolving video details…");
     const data = await requestJson("/api/jobs/url", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1043,13 +1186,18 @@ select("#url-form").addEventListener("submit", async (event) => {
     await Promise.all([pollJobs(), pollDownloadHistory()]);
   } catch (error) {
     urlStatus.textContent = error.message;
-    failRequestProgress(progressRequestId, error.message);
+    if (progressRequestId) failRequestProgress(progressRequestId, error.message);
   } finally {
     button.disabled = false;
   }
 });
 
 async function submitVideo(video) {
+  urlStatus.textContent = "Checking processing services…";
+  if (!await confirmProcessingServices(false)) {
+    urlStatus.textContent = "Request cancelled. Make the processing services ready, then try again.";
+    return;
+  }
   const progressRequestId = beginRequestProgress(video.title, "Adding video to the queue…");
   try {
     const data = await requestJson("/api/jobs", {
@@ -1364,6 +1512,14 @@ async function copyJobLink(url) {
 }
 
 async function updateJobExecution(jobId, action) {
+  if (action === "restart") {
+    const job = latestJobs.find((candidate) => candidate.id === jobId);
+    queueStatus.textContent = "Checking processing services…";
+    if (!await confirmProcessingServices(Boolean(job?.synthesize))) {
+      queueStatus.textContent = "Restart cancelled. Make the processing services ready, then try again.";
+      return;
+    }
+  }
   queueStatus.textContent = action === "pause"
     ? "Requesting a safe pause…"
     : (action === "restart" ? "Restarting failed task…" : "Resuming…");
@@ -1402,6 +1558,15 @@ async function restartSelectedFailedJobs() {
     .map((job) => job.id);
   if (!jobIds.length) return;
   if (!window.confirm(`Restart ${jobIds.length} selected failed task(s)?`)) return;
+
+  const needsSynthesis = latestJobs.some(
+    (job) => jobIds.includes(job.id) && Boolean(job.synthesize),
+  );
+  queueStatus.textContent = "Checking processing services…";
+  if (!await confirmProcessingServices(needsSynthesis)) {
+    queueStatus.textContent = "Restart cancelled. Make the processing services ready, then try again.";
+    return;
+  }
 
   queueStatus.textContent = `Restarting ${jobIds.length} failed task(s)…`;
   restartSelectedJobs.disabled = true;

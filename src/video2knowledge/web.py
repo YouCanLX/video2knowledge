@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import shutil
 from contextlib import asynccontextmanager, suppress
@@ -10,6 +11,7 @@ from urllib.parse import urlparse
 from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .adapters.bili_dl import BiliDlProvider
-from .adapters.llm import create_enricher
+from .adapters.llm import _resolve_codex_executable, create_enricher
 from .config import Settings
 from .mlx_service import MlxAudioServiceManager
 from .models import JobStatus, VideoItem
@@ -227,6 +229,127 @@ async def _open_local_path(path: Path, reveal: bool) -> None:
         raise RuntimeError(detail or f"The open command exited with status {process.returncode}")
 
 
+async def _llm_preflight(settings: Settings) -> dict[str, str | bool]:
+    if settings.llm_backend == "codex_cli":
+        executable = _resolve_codex_executable(settings.codex_cli_path)
+        if not executable:
+            return {
+                "key": "llm",
+                "label": "Codex CLI",
+                "ready": False,
+                "message": "Codex CLI was not found. Check its path in Runtime Settings.",
+            }
+        try:
+            process = await asyncio.create_subprocess_exec(
+                executable,
+                "login",
+                "status",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except OSError:
+            return {
+                "key": "llm",
+                "label": "Codex CLI",
+                "ready": False,
+                "message": "Codex CLI login status could not be confirmed.",
+            }
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except TimeoutError:
+            process.kill()
+            await process.wait()
+            return {
+                "key": "llm",
+                "label": "Codex CLI",
+                "ready": False,
+                "message": "Codex CLI login status check timed out.",
+            }
+        ready = process.returncode == 0
+        return {
+            "key": "llm",
+            "label": "Codex CLI",
+            "ready": ready,
+            "message": (
+                "Codex CLI is installed and signed in."
+                if ready
+                else "Codex CLI is not signed in. Run codex login, then check again."
+            ),
+        }
+
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response = await client.get(f"{settings.llm_base_url.rstrip('/')}/models")
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return {
+            "key": "llm",
+            "label": "LLM service",
+            "ready": False,
+            "message": "The configured OpenAI-compatible LLM service is not reachable.",
+        }
+    model_rows = payload.get("data", []) if isinstance(payload, dict) else []
+    model_ids = {
+        str(model.get("id")) for model in model_rows if isinstance(model, dict) and model.get("id")
+    }
+    ready = not model_ids or settings.llm_model in model_ids
+    return {
+        "key": "llm",
+        "label": "LLM service",
+        "ready": ready,
+        "message": (
+            f"LLM service is ready with {settings.llm_model}."
+            if ready
+            else f"Configured model {settings.llm_model} is not available from the LLM service."
+        ),
+    }
+
+
+async def _runtime_preflight(
+    settings: Settings, mlx_manager: MlxAudioServiceManager, synthesize: bool = False
+) -> dict:
+    mlx_status, llm_check = await asyncio.gather(mlx_manager.status(), _llm_preflight(settings))
+    decoder_ready = importlib.util.find_spec("av") is not None
+    checks: list[dict[str, str | bool]] = [
+        {
+            "key": "transcription",
+            "label": "MLX Audio speech-to-text",
+            "ready": mlx_status.reachable,
+            "message": (
+                "MLX Audio is reachable for transcription."
+                if mlx_status.reachable
+                else "MLX Audio is not ready. Start it from Runtime Settings and wait for Running."
+            ),
+        },
+        {
+            "key": "audio_decoder",
+            "label": "Audio decoder",
+            "ready": decoder_ready,
+            "message": (
+                "PyAV audio decoding is available."
+                if decoder_ready
+                else "PyAV is missing from the active wv2t environment."
+            ),
+        },
+        llm_check,
+    ]
+    if synthesize:
+        checks.append(
+            {
+                "key": "speech_synthesis",
+                "label": "MLX Audio text-to-speech",
+                "ready": mlx_status.reachable,
+                "message": (
+                    "MLX Audio is reachable for speech synthesis."
+                    if mlx_status.reachable
+                    else "Speech synthesis also requires the MLX Audio service."
+                ),
+            }
+        )
+    return {"ready": all(bool(check["ready"]) for check in checks), "checks": checks}
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.load()
     services = build_services(settings)
@@ -371,7 +494,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/jobs")
     async def list_jobs(limit: int = Query(default=50, ge=1, le=5000)):
-        return repository.list_jobs(limit=limit)
+        active_job_ids = runner.active_job_ids
+        rows = repository.list_jobs(limit=limit)
+        for row in rows:
+            row["session_active"] = row["id"] in active_job_ids
+        return rows
 
     @app.get("/api/jobs/{job_id}")
     async def get_job(job_id: str):
@@ -537,6 +664,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/settings")
     async def get_settings():
         return _settings_payload(settings)
+
+    @app.get("/api/runtime/preflight")
+    async def runtime_preflight(synthesize: bool = False):
+        return await _runtime_preflight(settings, mlx_manager, synthesize)
 
     @app.put("/api/settings")
     async def update_settings(body: RuntimeSettingsRequest):

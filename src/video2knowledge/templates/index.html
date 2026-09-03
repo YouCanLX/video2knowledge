@@ -300,6 +300,20 @@
     <section class="request-progress-stack" id="request-progress-stack"
       aria-label="Download request progress" aria-live="polite"></section>
 
+    <dialog class="preflight-dialog" id="preflight-dialog" aria-labelledby="preflight-title">
+      <div class="preflight-dialog-content">
+        <span class="preflight-kicker">Service readiness check</span>
+        <h2 id="preflight-title">Some processing services are not ready</h2>
+        <p>Fix the unavailable services before submitting is recommended. You can still continue if you understand that these tasks may fail.</p>
+        <div class="preflight-checks" id="preflight-checks"></div>
+        <div class="preflight-actions">
+          <button type="button" class="secondary" id="preflight-cancel">Cancel</button>
+          <button type="button" id="preflight-settings">Review Runtime Settings</button>
+          <button type="button" class="warning" id="preflight-continue">Continue anyway</button>
+        </div>
+      </div>
+    </dialog>
+
     <footer>
       Markdown is the source of truth · LRC/JSON preserve synchronized timelines ·
       One video downloads at a time

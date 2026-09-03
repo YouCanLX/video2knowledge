@@ -192,6 +192,11 @@ class SerialJobRunner:
         if not self._worker or self._worker.done():
             self._worker = asyncio.create_task(self._work())
 
+    @property
+    def active_job_ids(self) -> set[str]:
+        """Jobs owned by this runner session, including its queued item."""
+        return set(self._controls)
+
     async def submit(
         self,
         item: VideoItem,

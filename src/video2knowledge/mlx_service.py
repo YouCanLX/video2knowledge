@@ -113,10 +113,10 @@ class MlxAudioServiceManager:
     async def _is_reachable(self) -> bool:
         try:
             async with httpx.AsyncClient(timeout=1) as client:
-                await client.get(f"{self.base_url}/v1/models")
+                response = await client.get(f"{self.base_url}/v1/models")
         except httpx.RequestError:
             return False
-        return True
+        return response.is_success
 
     def _read_log_tail(self, max_bytes: int = 8_000) -> str:
         if not self.log_path.exists():
