@@ -12,6 +12,7 @@ the in-development `0.1.0` alpha version.
 
 | Type | Change | Commit |
 | --- | --- | --- |
+| Feature | Group download-history collections and individual videos under collapsible creator rows. | `cadce82` |
 | Feature | Deduplicate downloaded media by SHA-256 content hash while retaining source references. | `d26e58a` |
 | Feature | Reuse complete media, transcription, enrichment, and export results unless force refresh is requested. | `99c86ee` |
 | Bug fix | Allow stale non-terminal job records left by previous sessions to be cleaned up safely. | `3597413` |
