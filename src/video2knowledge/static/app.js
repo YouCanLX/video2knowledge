@@ -7,6 +7,7 @@ const queueToggle = select("#queue-toggle");
 const queueContent = select("#queue-content");
 const queueCreatorFilter = select("#queue-creator-filter");
 const queueCollectionFilter = select("#queue-collection-filter");
+const queueStatusFilter = select("#queue-status-filter");
 const queueYearFilter = select("#queue-year-filter");
 const queueMonthFilter = select("#queue-month-filter");
 const queueDayFilter = select("#queue-day-filter");
@@ -71,6 +72,14 @@ function formatJobTime(value) {
 function jobCreatedDateParts(value) {
   const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? { year: match[1], month: match[2], day: match[3] } : null;
+}
+
+function jobMatchesStatusFilter(job, filter) {
+  if (!filter) return true;
+  if (filter === "running") {
+    return !["complete", "failed", "queued"].includes(job.status);
+  }
+  return job.status === filter;
 }
 
 function setDateFilterOptions(data) {
@@ -649,7 +658,9 @@ async function pollJobs() {
       const yearMatches = !queueYearFilter.value || created?.year === queueYearFilter.value;
       const monthMatches = !queueMonthFilter.value || created?.month === queueMonthFilter.value;
       const dayMatches = !queueDayFilter.value || created?.day === queueDayFilter.value;
-      return creatorMatches && collectionMatches && yearMatches && monthMatches && dayMatches;
+      const statusMatches = jobMatchesStatusFilter(job, queueStatusFilter.value);
+      return creatorMatches && collectionMatches && yearMatches && monthMatches
+        && dayMatches && statusMatches;
     });
     const activeJobs = filteredData.filter(
       (job) => !["complete", "failed"].includes(job.status),
@@ -734,7 +745,7 @@ async function pollJobs() {
         </div>
       </div>
     `;
-    }).join("") : '<div class="empty">No jobs for this creator</div>';
+    }).join("") : '<div class="empty">No jobs match the current filters</div>';
     jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
       button.addEventListener("click", () => {
         const jobId = button.dataset.toggleJob;
@@ -982,6 +993,7 @@ queueToggle.addEventListener("click", () => {
 });
 queueCreatorFilter.addEventListener("change", pollJobs);
 queueCollectionFilter.addEventListener("change", pollJobs);
+queueStatusFilter.addEventListener("change", pollJobs);
 queueYearFilter.addEventListener("change", () => {
   queueMonthFilter.value = "";
   queueDayFilter.value = "";

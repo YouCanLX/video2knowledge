@@ -66,6 +66,7 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="queue-summary"' in page.text
     assert 'id="queue-creator-filter"' in page.text
     assert 'id="queue-collection-filter"' in page.text
+    assert 'id="queue-status-filter"' in page.text
     assert 'id="queue-year-filter"' in page.text
     assert 'id="queue-month-filter"' in page.text
     assert 'id="queue-day-filter"' in page.text
@@ -85,6 +86,7 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "data-quick-delete-job" in script.text
     assert '"/api/jobs/batch-delete"' in script.text
     assert 'requestJson("/api/jobs?limit=5000")' in script.text
+    assert 'filter === "running"' in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
     assert 'data-batch-scope="all-collections"' in script.text

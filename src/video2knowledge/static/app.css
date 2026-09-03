@@ -379,6 +379,7 @@ main {
 .queue-content[hidden] { display: none; }
 .queue-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
@@ -386,7 +387,7 @@ main {
   font-size: 12px;
 }
 .queue-toolbar select {
-  min-width: 0;
+  min-width: 90px;
   flex: 1;
   padding: 7px 9px;
   border: 1px solid var(--line);
