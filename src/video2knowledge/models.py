@@ -31,6 +31,9 @@ class VideoItem:
     published_at: str = ""
     tags: list[str] = field(default_factory=list)
     is_charging: bool = False
+    collection_kind: str = ""
+    collection_id: int = 0
+    collection_title: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

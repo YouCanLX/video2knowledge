@@ -225,6 +225,7 @@ main {
 .collection-list { display: grid; gap: 10px; }
 .collection-card { overflow: hidden; }
 .collection-card.selected { border-color: #71a18e; box-shadow: inset 4px 0 var(--green); }
+.collection-card.partial { border-color: #b39753; box-shadow: inset 4px 0 #c29a3a; }
 
 .collection-summary {
   display: grid;
@@ -282,7 +283,6 @@ main {
 }
 
 .creator-video:has(input:checked) { border-color: #71a18e; background: #f0f7ed; }
-.creator-video.disabled { opacity: 0.55; cursor: default; }
 .creator-video img { width: 72px; height: 45px; border-radius: 6px; object-fit: cover; }
 .creator-video strong { font-size: 12px; }
 

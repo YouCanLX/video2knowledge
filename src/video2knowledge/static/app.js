@@ -109,12 +109,18 @@ function collectionKey(kind, id) {
   return `${kind}:${id}`;
 }
 
-function videoChoice(video, disabled = false) {
-  const checked = creatorState.selectedVideos.has(video.source_id);
+function videoChoice(video, parentCollectionKey = "") {
+  const collectionSelection = parentCollectionKey
+    ? creatorState.selectedCollections.get(parentCollectionKey)
+    : null;
+  const selectedByCollection = collectionSelection
+    && !collectionSelection.excludedVideoIds.has(video.source_id);
+  const checked = selectedByCollection || creatorState.selectedVideos.has(video.source_id);
   return `
-    <label class="creator-video ${disabled ? "disabled" : ""}">
+    <label class="creator-video">
       <input type="checkbox" data-creator-video="${escapeHtml(video.source_id)}"
-        ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
+        ${parentCollectionKey ? `data-parent-collection="${escapeHtml(parentCollectionKey)}"` : ""}
+        ${checked ? "checked" : ""}>
       <img src="${escapeHtml(imageSource(video.cover_url))}" alt="" loading="lazy">
       <span>
         <strong>${escapeHtml(video.title)}</strong>
@@ -131,7 +137,10 @@ function renderCreatorBrowser() {
   }
   creatorBrowser.hidden = false;
   const state = creatorState;
-  const selectedCollections = state.selectedCollections.size;
+  const wholeCollections = [...state.selectedCollections.values()].filter(
+    (selection) => selection.excludedVideoIds.size === 0,
+  ).length;
+  const partialCollections = state.selectedCollections.size - wholeCollections;
   const selectedVideos = state.selectedVideos.size;
   const uploadItems = state.uploads.items.map((video) => videoChoice(video)).join("");
   creatorContent.innerHTML = `
@@ -172,12 +181,20 @@ function renderCreatorBrowser() {
     <div class="collection-list">
       ${state.collections.map((collection) => {
         const key = collectionKey(collection.kind, collection.id);
-        const wholeSelected = state.selectedCollections.has(key);
+        const collectionSelection = state.selectedCollections.get(key);
+        const wholeSelected = collectionSelection?.excludedVideoIds.size === 0;
+        const hasSelectedLoadedVideo = collection.videos.some(
+          (video) => state.selectedVideos.has(video.source_id),
+        );
+        const partialSelected = Boolean(
+          (collectionSelection && !wholeSelected) || (!collectionSelection && hasSelectedLoadedVideo),
+        );
         return `
-          <article class="collection-card ${wholeSelected ? "selected" : ""}">
+          <article class="collection-card ${wholeSelected ? "selected" : ""} ${partialSelected ? "partial" : ""}">
             <div class="collection-summary">
               <label class="collection-check">
                 <input type="checkbox" data-creator-collection="${escapeHtml(key)}"
+                  data-partial="${partialSelected}"
                   ${wholeSelected ? "checked" : ""}>
                 <img src="${escapeHtml(imageSource(collection.cover_url))}" alt="" loading="lazy">
                 <span>
@@ -194,7 +211,7 @@ function renderCreatorBrowser() {
               <div class="creator-video-list">
                 ${collection.loading && !collection.videos.length
                   ? '<div class="empty compact">Loading videos…</div>'
-                  : collection.videos.map((video) => videoChoice(video, wholeSelected)).join("")}
+                  : collection.videos.map((video) => videoChoice(video, key)).join("")}
               </div>
               ${collection.hasMore ? `<button type="button" class="load-more"
                 data-more-collection="${escapeHtml(key)}">Load more videos</button>` : ""}
@@ -206,9 +223,9 @@ function renderCreatorBrowser() {
     ${state.collectionsHasMore ? '<button type="button" class="load-more wide" data-more-collections>Load more collections</button>' : ""}
 
     <div class="selection-bar">
-      <span><strong>${selectedCollections}</strong> whole collections and <strong>${selectedVideos}</strong> individual videos selected</span>
+      <span><strong>${wholeCollections}</strong> whole, <strong>${partialCollections}</strong> partial collections and <strong>${selectedVideos}</strong> individual videos selected</span>
       <button type="button" data-batch-scope="selected"
-        ${state.batching || (!selectedCollections && !selectedVideos) ? "disabled" : ""}>
+        ${state.batching || (!state.selectedCollections.size && !selectedVideos) ? "disabled" : ""}>
         Add selection to queue
       </button>
     </div>
@@ -289,8 +306,14 @@ async function loadMoreCollectionVideos(key) {
     const data = await requestJson(
       `/api/creators/${creatorState.creator.id}/collections/${collection.kind}/${collection.id}/videos?page=${page}&page_size=12`,
     );
-    rememberVideos(data.items);
-    collection.videos.push(...data.items.filter(
+    const contextualItems = data.items.map((item) => ({
+      ...item,
+      collection_kind: collection.kind,
+      collection_id: collection.id,
+      collection_title: collection.title,
+    }));
+    rememberVideos(contextualItems);
+    collection.videos.push(...contextualItems.filter(
       (item) => !collection.videos.some((video) => video.source_id === item.source_id),
     ));
     collection.videoPage = data.page;
@@ -310,7 +333,14 @@ async function submitCreatorBatch(scope) {
     creator_id: state.creator.id,
     all_collections: scope === "all-collections",
     all_uploads: scope === "all-uploads",
-    collections: scope === "selected" ? [...state.selectedCollections.values()] : [],
+    collections: scope === "selected" ? [...state.selectedCollections.values()].map(
+      (selection) => ({
+        kind: selection.kind,
+        id: selection.id,
+        title: selection.title,
+        excluded_video_ids: [...selection.excludedVideoIds],
+      }),
+    ) : [],
     videos: scope === "selected" ? [...state.selectedVideos.values()] : [],
     language: "zh-CN",
     synthesize: false,
@@ -343,12 +373,15 @@ async function submitCreatorBatch(scope) {
 
 function bindCreatorControls() {
   creatorContent.querySelectorAll("[data-creator-collection]").forEach((input) => {
+    input.indeterminate = input.dataset.partial === "true";
     input.addEventListener("change", () => {
       const collection = creatorState.collectionIndex.get(input.dataset.creatorCollection);
       if (input.checked) {
         creatorState.selectedCollections.set(input.dataset.creatorCollection, {
           kind: collection.kind,
           id: collection.id,
+          title: collection.title,
+          excludedVideoIds: new Set(),
         });
       } else {
         creatorState.selectedCollections.delete(input.dataset.creatorCollection);
@@ -359,7 +392,18 @@ function bindCreatorControls() {
   creatorContent.querySelectorAll("[data-creator-video]").forEach((input) => {
     input.addEventListener("change", () => {
       const sourceId = input.dataset.creatorVideo;
-      if (input.checked) {
+      const parentKey = input.dataset.parentCollection;
+      const collectionSelection = parentKey
+        ? creatorState.selectedCollections.get(parentKey)
+        : null;
+      if (collectionSelection) {
+        if (input.checked) {
+          collectionSelection.excludedVideoIds.delete(sourceId);
+        } else {
+          collectionSelection.excludedVideoIds.add(sourceId);
+          creatorState.selectedVideos.delete(sourceId);
+        }
+      } else if (input.checked) {
         creatorState.selectedVideos.set(sourceId, creatorState.videoIndex.get(sourceId));
       } else {
         creatorState.selectedVideos.delete(sourceId);

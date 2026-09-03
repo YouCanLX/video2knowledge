@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .exporters import render_lrc
 from .models import KnowledgeDocument
-from .naming import library_stem
+from .naming import library_filename_stem
 
 
 def export_apple_music(
@@ -17,7 +17,7 @@ def export_apple_music(
     if not ffmpeg:
         raise RuntimeError("Apple Music export requires ffmpeg")
     output_dir.mkdir(parents=True, exist_ok=True)
-    stem = library_stem(document.video)
+    stem = library_filename_stem(document.video)
     m4a, lrc = output_dir / f"{stem}.m4a", output_dir / f"{stem}.lrc"
     plain_lyrics = "\n".join(segment.text for segment in document.segments)
     command = [

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .exporters import write_bundle
 from .models import JobStatus, KnowledgeDocument, VideoItem
-from .naming import library_stem
+from .naming import library_filename_stem, library_stem
 from .ports import SpeechToText, TextEnricher, TextToSpeech, VideoProvider
 from .repository import LibraryRepository
 
@@ -98,7 +98,9 @@ class Pipeline:
                 )
             document = KnowledgeDocument(item, segments, enrichment, language)
             stem = library_stem(item)
+            filename_stem = library_filename_stem(item)
             output_dir = self.library_dir / stem
+            output_dir.mkdir(parents=True, exist_ok=True)
             synthesized: Path | None = None
             if synthesize:
                 self.repository.update_job(
@@ -107,7 +109,7 @@ class Pipeline:
                 synthesized = await asyncio.to_thread(
                     self.tts.synthesize,
                     segments,
-                    output_dir / f"{stem}-tts.wav",
+                    output_dir / f"{filename_stem}-tts.wav",
                     language,
                 )
             outputs = {key: str(value) for key, value in write_bundle(document, output_dir).items()}

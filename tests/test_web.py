@@ -7,7 +7,12 @@ import video2knowledge.web as web_module
 from video2knowledge.config import Settings
 from video2knowledge.models import JobStatus, VideoItem
 from video2knowledge.urls import extract_bilibili_bvid, extract_bilibili_creator_id
-from video2knowledge.web import CreatorBatchRequest, _expand_creator_batch, create_app
+from video2knowledge.web import (
+    CollectionSelection,
+    CreatorBatchRequest,
+    _expand_creator_batch,
+    create_app,
+)
 
 
 def test_extract_bilibili_bvid_from_video_url():
@@ -86,7 +91,11 @@ def test_bilibili_image_proxy_rejects_non_bilibili_hosts(tmp_path):
 def test_creator_batch_expands_pages_and_removes_duplicate_videos():
     class FakeCreatorProvider:
         async def get_creator_collections(self, creator_id, page, page_size):
-            items = [{"kind": "season", "id": 10}] if page == 1 else []
+            items = (
+                [{"kind": "season", "id": 10, "title": "Trading course"}]
+                if page == 1
+                else []
+            )
             return {"items": items, "has_more": False}
 
         async def get_collection_videos(self, creator_id, kind, collection_id, page, page_size):
@@ -123,6 +132,36 @@ def test_creator_batch_expands_pages_and_removes_duplicate_videos():
         "BV1rP4y117ap",
     }
     assert all(item.author == "Creator" for item in expanded)
+    assert all(item.collection_title == "Trading course" for item in expanded)
+
+
+def test_creator_batch_excludes_deselected_collection_video():
+    class FakeCreatorProvider:
+        async def get_collection_videos(self, creator_id, kind, collection_id, page, page_size):
+            return {
+                "items": [video("BV1T64y1Z7WJ", "First"), video("BV1rP4y117ap", "Second")],
+                "has_more": False,
+            }
+
+        async def get_creator(self, creator_id):
+            return {"id": creator_id, "name": "Creator"}
+
+    def video(source_id, title):
+        return VideoItem(
+            "bilibili", source_id, title, f"https://example.test/{source_id}"
+        ).to_dict()
+
+    body = CreatorBatchRequest(
+        creator_id=37090048,
+        collections=[
+            CollectionSelection(
+                kind="season", id=10, excluded_video_ids=["BV1T64y1Z7WJ"]
+            )
+        ],
+    )
+    expanded = asyncio.run(_expand_creator_batch(FakeCreatorProvider(), body))
+
+    assert [item.source_id for item in expanded] == ["BV1rP4y117ap"]
 
 
 def test_runtime_settings_are_exposed_and_persisted(tmp_path):

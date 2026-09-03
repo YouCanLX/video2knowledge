@@ -23,11 +23,27 @@ def _truncate_utf8(value: str, max_bytes: int) -> str:
 
 
 def library_stem(item: VideoItem, max_bytes: int = 220) -> str:
-    """Build the shared `creator_title_video-id` directory and file stem."""
+    """Build the stable `creator_title_video-id` library directory name."""
     author = safe_component(item.author, "UnknownCreator")
     title = safe_component(item.title, "UntitledContent")
     source_id = safe_component(item.source_id, "NoVideoID")
     suffix = f"_{source_id}"
     prefix_budget = max(1, max_bytes - len(suffix.encode("utf-8")))
     prefix = _truncate_utf8(f"{author}_{title}", prefix_budget)
+    return f"{prefix}{suffix}"
+
+
+def library_filename_stem(item: VideoItem, max_bytes: int = 220) -> str:
+    """Build a file stem, inserting collection between creator and video title."""
+    author = safe_component(item.author, "UnknownCreator")
+    title = safe_component(item.title, "UntitledContent")
+    source_id = safe_component(item.source_id, "NoVideoID")
+    components = [author]
+    if item.collection_title or item.collection_id:
+        collection = item.collection_title or f"Collection-{item.collection_id}"
+        components.append(safe_component(collection, "Collection"))
+    components.append(title)
+    suffix = f"_{source_id}"
+    prefix_budget = max(1, max_bytes - len(suffix.encode("utf-8")))
+    prefix = _truncate_utf8("_".join(components), prefix_budget)
     return f"{prefix}{suffix}"

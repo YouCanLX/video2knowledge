@@ -97,6 +97,43 @@ def test_pipeline_reuses_cached_media_unless_forced(tmp_path):
     asyncio.run(scenario())
 
 
+def test_collection_tts_filename_changes_without_changing_library_directory(tmp_path):
+    async def scenario():
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            FakeProvider(),
+            FakeSTT(),
+            FakeLLM(),
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        item = VideoItem(
+            "bilibili",
+            "BV1COLLECTION",
+            "Lesson",
+            "https://example.test/video",
+            "Creator",
+            collection_id=9,
+            collection_title="Course",
+        )
+        job_id = repo.create_job(item)
+
+        return await pipeline.run(job_id, item, synthesize=True)
+
+    outputs = asyncio.run(scenario())
+    unchanged_directory = tmp_path / "library" / "Creator_Lesson_BV1COLLECTION"
+
+    assert unchanged_directory.is_dir()
+    assert outputs["audio"] == str(
+        unchanged_directory / "Creator_Course_Lesson_BV1COLLECTION-tts.wav"
+    )
+    assert outputs["markdown"] == str(
+        unchanged_directory / "Creator_Course_Lesson_BV1COLLECTION.md"
+    )
+
+
 def test_pipeline_ignores_empty_cached_media(tmp_path):
     async def scenario():
         provider = FakeProvider()

@@ -48,6 +48,8 @@ class UrlJobRequest(BaseModel):
 class CollectionSelection(BaseModel):
     kind: Literal["season", "series"]
     id: int = Field(gt=0)
+    title: str = Field(default="", max_length=300)
+    excluded_video_ids: list[str] = Field(default_factory=list, max_length=5000)
 
 
 class CreatorBatchRequest(BaseModel):
@@ -166,7 +168,12 @@ async def _expand_creator_batch(provider, body: CreatorBatchRequest) -> list[Vid
             lambda page, size: provider.get_creator_collections(body.creator_id, page, size),
             page_size=20,
         )
-        collections = [CollectionSelection(kind=row["kind"], id=row["id"]) for row in rows]
+        collections = [
+            CollectionSelection(
+                kind=row["kind"], id=row["id"], title=str(row.get("title") or "")
+            )
+            for row in rows
+        ]
     if body.all_uploads:
         rows = await _fetch_all_pages(
             lambda page, size: provider.get_creator_videos(body.creator_id, page, size)
@@ -174,6 +181,7 @@ async def _expand_creator_batch(provider, body: CreatorBatchRequest) -> list[Vid
         selected.update((row["source_id"], VideoItem(**row)) for row in rows)
     creator: dict[str, str | int] | None = None
     for collection in collections:
+        excluded_video_ids = set(collection.excluded_video_ids)
         rows = await _fetch_all_pages(
             lambda page, size, current=collection: provider.get_collection_videos(
                 body.creator_id, current.kind, current.id, page, size
@@ -183,7 +191,12 @@ async def _expand_creator_batch(provider, body: CreatorBatchRequest) -> list[Vid
             creator = await provider.get_creator(body.creator_id)
         for row in rows:
             video = VideoItem(**row)
+            if video.source_id in excluded_video_ids:
+                continue
             video.author = video.author or str(creator["name"])
+            video.collection_kind = collection.kind
+            video.collection_id = collection.id
+            video.collection_title = collection.title
             selected[video.source_id] = video
     return list(selected.values())
 
