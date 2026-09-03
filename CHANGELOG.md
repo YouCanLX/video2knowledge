@@ -12,6 +12,7 @@ the in-development `0.1.0` alpha version.
 
 | Type | Change | Commit |
 | --- | --- | --- |
+| Bug fix | Backfill missing creator avatars in legacy collection and video history. | Pending |
 | Improvement | Update collection filter choices to match the selected creators. | `2c5382f` |
 | Performance | Pipeline up to three concurrent downloads into serialized local transcription and concurrent LLM enrichment. | `a57d95e` |
 | Feature | Support multi-select queue filters for creator, collection, status, and created year, month, and day. | `24fc18e` |

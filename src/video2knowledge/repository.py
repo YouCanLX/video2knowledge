@@ -349,6 +349,23 @@ class LibraryRepository:
         ).fetchall()
         return [self._history_dict(row) for row in rows]
 
+    def backfill_creator_avatar(self, author_id: str, avatar_url: str) -> int:
+        """Add a missing creator avatar to matching current jobs and history records."""
+        if not author_id or not avatar_url:
+            return 0
+        updated = 0
+        for table in ("jobs", "download_history"):
+            cursor = self.connection.execute(
+                f"""UPDATE {table}
+                    SET source_json=json_set(source_json, '$.creator_avatar_url', ?)
+                    WHERE CAST(json_extract(source_json, '$.author_id') AS TEXT)=?
+                      AND COALESCE(json_extract(source_json, '$.creator_avatar_url'), '')=''""",
+                (avatar_url, author_id),
+            )
+            updated += cursor.rowcount
+        self.connection.commit()
+        return updated
+
     def delete_download_history(self, source_id: str) -> bool:
         cursor = self.connection.execute(
             "DELETE FROM download_history WHERE source_id=?", (source_id,)

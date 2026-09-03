@@ -166,6 +166,75 @@ def test_bilibili_image_proxy_rejects_non_bilibili_hosts(tmp_path):
     assert response.status_code == 422
 
 
+def test_download_history_backfills_missing_creator_avatar(tmp_path, monkeypatch):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        repo = app.state.services.repository
+        item = VideoItem(
+            "bilibili",
+            "BVLEGACY",
+            "Legacy video",
+            "https://example.test/legacy",
+            author="Legacy creator",
+            author_id="123",
+        )
+        job_id = repo.create_job(item)
+        calls = 0
+
+        async def get_creator(creator_id):
+            nonlocal calls
+            calls += 1
+            assert creator_id == 123
+            return {
+                "id": creator_id,
+                "name": "Legacy creator",
+                "avatar": "https://i0.hdslb.com/bfs/face/legacy.jpg",
+            }
+
+        monkeypatch.setattr(app.state.services.provider, "get_creator", get_creator)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            first = await client.get("/api/download-history")
+            second = await client.get("/api/download-history")
+        return first, second, repo, job_id, calls
+
+    first, second, repo, job_id, calls = asyncio.run(scenario())
+
+    assert first.status_code == 200
+    assert first.json()[0]["source"]["creator_avatar_url"].endswith("/legacy.jpg")
+    assert second.json()[0]["source"]["creator_avatar_url"].endswith("/legacy.jpg")
+    assert repo.get_job(job_id)["source"]["creator_avatar_url"].endswith("/legacy.jpg")
+    assert calls == 1
+
+
+def test_download_history_survives_creator_avatar_backfill_failure(tmp_path, monkeypatch):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        app.state.services.repository.create_job(
+            VideoItem(
+                "bilibili",
+                "BVLEGACY",
+                "Legacy video",
+                "https://example.test/legacy",
+                author="Legacy creator",
+                author_id="123",
+            )
+        )
+
+        async def get_creator(_creator_id):
+            raise RuntimeError("profile unavailable")
+
+        monkeypatch.setattr(app.state.services.provider, "get_creator", get_creator)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get("/api/download-history")
+
+    response = asyncio.run(scenario())
+
+    assert response.status_code == 200
+    assert response.json()[0]["source"]["creator_avatar_url"] == ""
+
+
 def test_creator_batch_expands_pages_and_removes_duplicate_videos():
     class FakeCreatorProvider:
         async def get_creator_collections(self, creator_id, page, page_size):

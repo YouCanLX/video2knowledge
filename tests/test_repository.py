@@ -43,6 +43,39 @@ def test_job_and_document_round_trip(tmp_path):
     assert reopened.list_download_history() == []
 
 
+def test_creator_avatar_backfill_updates_jobs_and_history_without_overwriting(tmp_path):
+    repo = LibraryRepository(tmp_path / "data.db")
+    missing = VideoItem(
+        "bilibili",
+        "BVMISSING",
+        "Missing",
+        "https://example.test/missing",
+        author="Creator",
+        author_id="123",
+    )
+    existing = VideoItem(
+        "bilibili",
+        "BVEXISTING",
+        "Existing",
+        "https://example.test/existing",
+        author="Creator",
+        author_id="123",
+        creator_avatar_url="https://i0.hdslb.com/old.jpg",
+    )
+    missing_job = repo.create_job(missing)
+    existing_job = repo.create_job(existing)
+
+    assert repo.backfill_creator_avatar("123", "https://i0.hdslb.com/new.jpg") == 2
+    assert repo.get_job(missing_job)["source"]["creator_avatar_url"].endswith("/new.jpg")
+    assert repo.get_download_history("BVMISSING")["source"]["creator_avatar_url"].endswith(
+        "/new.jpg"
+    )
+    assert repo.get_job(existing_job)["source"]["creator_avatar_url"].endswith("/old.jpg")
+    assert repo.get_download_history("BVEXISTING")["source"]["creator_avatar_url"].endswith(
+        "/old.jpg"
+    )
+
+
 def test_job_restart_parameters_are_persisted_and_history_is_restored(tmp_path):
     repo = LibraryRepository(tmp_path / "data.db")
     item = VideoItem("bilibili", "BVRETRY", "Retry", "https://example.test/retry")

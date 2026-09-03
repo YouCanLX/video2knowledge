@@ -47,7 +47,7 @@ speech and an Apple Music-compatible M4A file.
 - ✅ Persists download history and request progress in SQLite with multi-select queue filters
   for creator, collection, status, and created date; collection choices follow the selected
   creators. Collections and individual videos are grouped under collapsible creator rows with
-  avatars.
+  avatars, including automatically backfilled avatars for legacy history records.
 - ✅ Supports pausing and resuming queued work, restarting failed jobs individually or in
   batches, and cleaning up stale terminal records.
 - ✅ Provides interactive queue file controls for opening or revealing generated files and

@@ -399,6 +399,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.mlx_base_url,
         settings.data_dir / "logs" / "mlx-audio.log",
     )
+    creator_avatar_retry_after: dict[str, float] = {}
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -658,7 +659,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/download-history")
     async def list_download_history(limit: int = Query(default=5000, ge=1, le=5000)):
-        return repository.list_download_history(limit=limit)
+        entries = repository.list_download_history(limit=limit)
+        now = asyncio.get_running_loop().time()
+        missing_creator_ids = {
+            str(entry["source"].get("author_id") or "")
+            for entry in entries
+            if not entry["source"].get("creator_avatar_url")
+        }
+        for creator_id in sorted(value for value in missing_creator_ids if value.isdigit()):
+            if creator_avatar_retry_after.get(creator_id, 0) > now:
+                continue
+            try:
+                creator = await provider.get_creator(int(creator_id))
+                avatar_url = str(creator.get("avatar") or "")
+            except Exception as exc:  # noqa: BLE001 - history must survive optional enrichment
+                logger.info("creator avatar backfill failed for %s: %s", creator_id, exc)
+                creator_avatar_retry_after[creator_id] = now + 300
+                continue
+            if not avatar_url:
+                creator_avatar_retry_after[creator_id] = now + 300
+                continue
+            repository.backfill_creator_avatar(creator_id, avatar_url)
+            creator_avatar_retry_after[creator_id] = float("inf")
+            for entry in entries:
+                if str(entry["source"].get("author_id") or "") == creator_id:
+                    entry["source"]["creator_avatar_url"] = avatar_url
+        return entries
 
     @app.post("/api/download-history/batch-delete")
     async def delete_download_history(body: DeleteDownloadHistoryRequest):
