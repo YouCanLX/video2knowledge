@@ -98,7 +98,7 @@ let lastNetworkRefreshAt = 0;
 function refreshNetworkState(force = false) {
   if (document.hidden) return;
   const now = Date.now();
-  if (!force && now - lastNetworkRefreshAt < 750) return;
+  if (!force && now - lastNetworkRefreshAt < 30000) return;
   lastNetworkRefreshAt = now;
   pollJobs();
   pollMlxStatus();
@@ -1266,9 +1266,7 @@ async function pollJobs() {
       return creatorMatches && collectionMatches && yearMatches && monthMatches
         && dayMatches && statusMatches;
     });
-    const activeJobs = filteredData.filter(
-      (job) => !["complete", "failed"].includes(job.status),
-    ).length;
+    const activeJobs = filteredData.filter(jobNeedsPolling).length;
     queueSummary.textContent = data.length
       ? `${filteredData.length}${filteredData.length !== data.length ? ` of ${data.length}` : ""} jobs${activeJobs ? ` · ${activeJobs} active` : ""}`
       : "No jobs";
@@ -1309,7 +1307,7 @@ async function pollJobs() {
             </div>
           </details>`
         : "";
-      const canDelete = job.status === "complete" || job.status === "failed";
+      const canDelete = ["complete", "failed"].includes(job.status) || !job.session_active;
       const canRestart = job.status === "failed";
       const canResume = job.status === "paused" || job.status === "pausing";
       const canPause = !canDelete && !canResume;
@@ -1338,7 +1336,7 @@ async function pollJobs() {
               <span class="job-disclosure" aria-hidden="true">${expanded ? "−" : "+"}</span>
             </span>
           </button>
-          ${job.status === "complete" ? "" : `<button type="button"
+          ${job.status === "complete" || (canDelete && !canRestart) ? "" : `<button type="button"
             class="job-control ${executionAction}"
             data-${executionAction}-job="${escapeHtml(job.id)}"
             title="${executionLabel} processing"
@@ -1381,7 +1379,7 @@ async function pollJobs() {
       jobsByDate.get(dateKey).push(job);
     });
     jobs.innerHTML = filteredData.length ? [...jobsByDate.entries()].map(([date, dateJobs]) => {
-      const active = dateJobs.filter((job) => !["complete", "failed"].includes(job.status)).length;
+      const active = dateJobs.filter(jobNeedsPolling).length;
       return `
         <details class="queue-date-group" data-queue-date="${escapeHtml(date)}"
           ${expandedQueueDates.has(date) ? "open" : ""}>

@@ -450,12 +450,13 @@ def test_delete_job_with_local_files_and_document(tmp_path):
     assert not media.exists()
 
 
-def test_active_job_cannot_be_deleted(tmp_path):
+def test_active_job_cannot_be_deleted(tmp_path, monkeypatch):
     async def scenario():
         app = create_app(Settings.load(tmp_path))
-        repo = app.state.services.repository
+        runner = app.state.runner
+        monkeypatch.setattr(runner, "start", lambda: None)
         item = VideoItem("bilibili", "BV1ACTIVE", "Active", "https://example.test")
-        job_id = repo.create_job(item)
+        job_id = await runner.submit(item)
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             return await client.delete(f"/api/jobs/{job_id}")
@@ -463,6 +464,26 @@ def test_active_job_cannot_be_deleted(tmp_path):
     response = asyncio.run(scenario())
 
     assert response.status_code == 409
+
+
+@pytest.mark.parametrize("status", [JobStatus.QUEUED, JobStatus.DOWNLOADING, JobStatus.PAUSED])
+def test_previous_session_nonterminal_job_can_be_deleted(tmp_path, status):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        repo = app.state.services.repository
+        job_id = repo.create_job(
+            VideoItem("bilibili", f"BV1STALE{status}", "Stale", "https://example.test/stale")
+        )
+        repo.update_job(job_id, status, 0.4, "left by a previous session")
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.delete(f"/api/jobs/{job_id}")
+        return response, repo, job_id
+
+    response, repo, job_id = asyncio.run(scenario())
+
+    assert response.status_code == 200
+    assert repo.get_job(job_id) is None
 
 
 def test_queued_job_can_be_paused_and_resumed_through_api(tmp_path, monkeypatch):
@@ -601,14 +622,42 @@ def test_batch_delete_completed_and_failed_jobs(tmp_path):
     assert repo.get_job(failed) is None
 
 
-def test_batch_delete_is_atomic_when_selection_contains_active_job(tmp_path):
+def test_batch_delete_previous_session_queued_and_running_jobs(tmp_path):
     async def scenario():
         app = create_app(Settings.load(tmp_path))
         repo = app.state.services.repository
+        queued = repo.create_job(
+            VideoItem("bilibili", "BV1OLDQUEUE", "Old queue", "https://example.test/queue")
+        )
+        running = repo.create_job(
+            VideoItem("bilibili", "BV1OLDRUN", "Old run", "https://example.test/run")
+        )
+        repo.update_job(running, JobStatus.TRANSCRIBING, 0.5, "previous session")
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/jobs/batch-delete", json={"job_ids": [queued, running]}
+            )
+        return response, repo, queued, running
+
+    response, repo, queued, running = asyncio.run(scenario())
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] == [queued, running]
+    assert repo.get_job(queued) is None
+    assert repo.get_job(running) is None
+
+
+def test_batch_delete_is_atomic_when_selection_contains_active_job(tmp_path, monkeypatch):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        runner = app.state.runner
+        repo = runner.pipeline.repository
+        monkeypatch.setattr(runner, "start", lambda: None)
         completed = repo.create_job(
             VideoItem("bilibili", "BV1DONE", "Done", "https://example.test/done")
         )
-        active = repo.create_job(
+        active = await runner.submit(
             VideoItem("bilibili", "BV1LIVE", "Live", "https://example.test/live")
         )
         repo.update_job(completed, JobStatus.COMPLETE, 1)

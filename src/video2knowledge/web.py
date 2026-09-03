@@ -584,8 +584,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         job = repository.get_job(job_id)
         if not job:
             raise HTTPException(404, "Job not found")
-        if job["status"] not in TERMINAL_JOB_STATUSES:
-            raise HTTPException(409, "Only completed or failed jobs can be deleted")
+        if job["status"] not in TERMINAL_JOB_STATUSES and job_id in runner.active_job_ids:
+            raise HTTPException(409, "Jobs active in the current session cannot be deleted")
 
         removed: list[str] = []
         skipped: list[str] = []
@@ -606,12 +606,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         active = [
             job_id
             for job_id, job in jobs.items()
-            if job is not None and job["status"] not in TERMINAL_JOB_STATUSES
+            if job is not None
+            and job["status"] not in TERMINAL_JOB_STATUSES
+            and job_id in runner.active_job_ids
         ]
         if missing:
             raise HTTPException(404, f"Job not found: {missing[0]}")
         if active:
-            raise HTTPException(409, "Only completed or failed jobs can be deleted")
+            raise HTTPException(409, "Jobs active in the current session cannot be deleted")
         for job_id in job_ids:
             repository.delete_job(job_id)
         return {"deleted": job_ids, "count": len(job_ids)}
