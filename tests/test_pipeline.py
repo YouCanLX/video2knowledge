@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from video2knowledge.models import Enrichment, TranscriptSegment, VideoItem
 from video2knowledge.pipeline import Pipeline, SerialJobRunner
@@ -263,13 +264,78 @@ def test_pipeline_reuses_cached_media_unless_forced(tmp_path):
         await pipeline.run(second_job, item)
 
         assert provider.download_count == 1
-        assert repo.get_job(second_job)["message"] == "Processing complete"
+        assert repo.get_job(second_job)["message"] == (
+            "Media, transcription, summary, and exports already complete"
+        )
         assert repo.get_job(second_job)["outputs"]["source_media"].endswith("audio.wav")
 
         refresh_job = repo.create_job(item)
         await pipeline.run(refresh_job, item, force_refresh=True)
 
         assert provider.download_count == 2
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_reuses_all_completed_outputs_unless_missing_or_forced(tmp_path):
+    class CountingSTT(FakeSTT):
+        def __init__(self):
+            self.count = 0
+
+        def transcribe(self, path, language=None):
+            self.count += 1
+            return super().transcribe(path, language)
+
+    class CountingLLM(FakeLLM):
+        def __init__(self):
+            self.count = 0
+
+        async def enrich(self, title, text, language):
+            self.count += 1
+            return await super().enrich(title, text, language)
+
+    async def scenario():
+        provider = FakeProvider()
+        stt = CountingSTT()
+        llm = CountingLLM()
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            provider,
+            stt,
+            llm,
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        item = VideoItem("bilibili", "BV1COMPLETE", "Complete", "https://example.test/video")
+
+        first_job = repo.create_job(item)
+        first_outputs = await pipeline.run(first_job, item)
+        second_job = repo.create_job(item)
+        second_outputs = await pipeline.run(second_job, item)
+
+        assert second_outputs == first_outputs
+        assert provider.download_count == 1
+        assert stt.count == 1
+        assert llm.count == 1
+        assert repo.get_job(second_job)["message"] == (
+            "Media, transcription, summary, and exports already complete"
+        )
+
+        # An incomplete bundle reuses the source download but rebuilds processing outputs.
+        Path(first_outputs["lyrics"]).unlink()
+        incomplete_job = repo.create_job(item)
+        await pipeline.run(incomplete_job, item)
+        assert provider.download_count == 1
+        assert stt.count == 2
+        assert llm.count == 2
+
+        refresh_job = repo.create_job(item, force_refresh=True)
+        await pipeline.run(refresh_job, item, force_refresh=True)
+        assert provider.download_count == 2
+        assert stt.count == 3
+        assert llm.count == 3
 
     asyncio.run(scenario())
 

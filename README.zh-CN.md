@@ -10,7 +10,7 @@ Video2Knowledge 是一套本地优先的处理流程，可将哔哩哔哩视频�
 
 - 接收哔哩哔哩视频链接，或在本地网页界面中搜索视频和创作者。
 - 使用 [`bili-dl`](https://github.com/war-ning/bili-dl) 下载需要登录或充电专属的内容；未配置 `bili-dl` 时回退到 `yt-dlp`。
-- 默认复用已下载的媒体文件，也支持明确指定强制刷新。
+- 若同一视频的媒体、转录、摘要和导出文件均完整存在，默认直接复用全部结果；也支持明确指定强制刷新整个处理流程。
 - 通过兼容 OpenAI API 的 MLX Audio 服务在本地完成转录。
 - 生成核心摘要、延伸洞察、建议和后续问题。
 - 保存便于阅读的 Markdown、同步歌词 LRC 和机器可读的 JSON 时间轴。
@@ -99,7 +99,7 @@ v2k qr-login
 v2k serve
 ```
 
-打开 <http://127.0.0.1:8765>，粘贴哔哩哔哩视频链接或搜索视频。仅在需要刷新本地副本时启用 **Force re-download cached video（强制重新下载缓存视频）**。
+打开 <http://127.0.0.1:8765>，粘贴哔哩哔哩视频链接或搜索视频。仅在需要重新下载并再次执行转录、摘要和导出时启用 **Force refresh download and all processing（强制刷新下载和全部处理）**。
 
 **Runtime Settings（运行时设置）** 面板可分别配置下载路径和 Markdown 导出路径、选择摘要后端（默认为 Codex CLI），以及启动、监控或停止本地 MLX Audio 服务。
 

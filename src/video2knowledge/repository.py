@@ -225,6 +225,20 @@ class LibraryRepository:
         row = self.connection.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         return self._job_dict(row) if row else None
 
+    def find_completed_job(
+        self, source_id: str, language: str, require_synthesized_audio: bool = False
+    ) -> dict[str, Any] | None:
+        """Return the newest compatible completed job for a source, if one exists."""
+        sql = """SELECT * FROM jobs
+                 WHERE json_extract(source_json, '$.source_id')=?
+                   AND language=? AND status=?"""
+        params: list[Any] = [source_id, language, JobStatus.COMPLETE]
+        if require_synthesized_audio:
+            sql += " AND synthesize=1"
+        sql += " ORDER BY updated_at DESC, created_at DESC LIMIT 1"
+        row = self.connection.execute(sql, params).fetchone()
+        return self._job_dict(row) if row else None
+
     def list_jobs(self, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.connection.execute(
             "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)

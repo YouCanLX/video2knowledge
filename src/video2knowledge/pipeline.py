@@ -27,6 +27,7 @@ MEDIA_SUFFIXES = {
     ".wav",
     ".webm",
 }
+REQUIRED_REUSABLE_OUTPUTS = {"markdown", "lyrics", "timeline", "metadata", "source_media"}
 
 
 def find_cached_media_files(media_dir: Path, source_id: str) -> list[Path]:
@@ -48,6 +49,23 @@ def find_cached_media(media_dir: Path, source_id: str) -> Path | None:
     """Find the newest complete media file associated with a source ID."""
     candidates = find_cached_media_files(media_dir, source_id)
     return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
+
+
+def reusable_outputs(job: dict, synthesize: bool = False) -> dict[str, str] | None:
+    """Return prior outputs only when every artifact needed by this request still exists."""
+    outputs = job.get("outputs") or {}
+    required = REQUIRED_REUSABLE_OUTPUTS | ({"audio"} if synthesize else set())
+    if not required.issubset(outputs):
+        return None
+    for key in required:
+        try:
+            path = Path(outputs[key]).expanduser()
+            available = path.is_file() and path.stat().st_size > 0
+        except (OSError, TypeError):
+            available = False
+        if not available:
+            return None
+    return {str(key): str(value) for key, value in outputs.items() if value}
 
 
 class Pipeline:
@@ -74,6 +92,20 @@ class Pipeline:
         checkpoint: PauseCheckpoint | None = None,
     ) -> dict[str, str]:
         try:
+            if not force_refresh:
+                previous = self.repository.find_completed_job(item.source_id, language, synthesize)
+                cached_outputs = reusable_outputs(previous, synthesize) if previous else None
+                if cached_outputs:
+                    self.repository.mark_job_downloaded(job_id)
+                    self.repository.save_document(item, cached_outputs, cached_outputs.get("audio"))
+                    self.repository.update_job(
+                        job_id,
+                        JobStatus.COMPLETE,
+                        1,
+                        "Media, transcription, summary, and exports already complete",
+                        cached_outputs,
+                    )
+                    return cached_outputs
             audio = None if force_refresh else find_cached_media(self.media_dir, item.source_id)
             if audio:
                 await self._set_stage(

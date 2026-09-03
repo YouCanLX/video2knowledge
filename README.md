@@ -16,7 +16,8 @@ speech and an Apple Music-compatible M4A file.
 - Accepts a Bilibili video URL or searches videos and creators in the local web UI.
 - Uses [`bili-dl`](https://github.com/war-ning/bili-dl) for authenticated and
   charging-content downloads; falls back to `yt-dlp` when `bili-dl` is not configured.
-- Reuses downloaded media by default and supports an explicit force-refresh option.
+- Reuses complete media, transcription, summary, and export results by default and supports
+  an explicit force-refresh option.
 - Transcribes locally through an MLX Audio OpenAI-compatible server.
 - Generates core summaries, further insights, suggestions, and follow-up questions.
 - Stores readable Markdown plus synchronized LRC and machine-readable JSON timelines.
@@ -117,7 +118,9 @@ v2k serve
 ```
 
 Open <http://127.0.0.1:8765>, paste a Bilibili URL, or search for a video. Enable
-**Force re-download cached video** only when the local copy must be refreshed.
+Use **Force refresh download and all processing** only when the media, transcription,
+summary, and exports must all be regenerated. Otherwise, a complete existing result for the
+same video and language is reused.
 The **Runtime Settings** panel independently configures download and Markdown export paths,
 selects the summary backend (Codex CLI by default), and starts, monitors, or stops the local
 MLX Audio service.
