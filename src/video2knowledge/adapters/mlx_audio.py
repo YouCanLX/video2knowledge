@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import math
 import wave
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -9,6 +11,69 @@ from tempfile import TemporaryDirectory
 import httpx
 
 from ..models import TranscriptSegment
+
+logger = logging.getLogger(__name__)
+
+
+def _timestamp(value: object) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _normalize_transcript_segments(payload: dict) -> list[TranscriptSegment]:
+    raw_segments = payload.get("segments") or []
+    usable = [
+        segment
+        for segment in raw_segments
+        if isinstance(segment, dict) and str(segment.get("text") or "").strip()
+    ]
+    duration = _timestamp(payload.get("duration"))
+    duration = max(0.0, duration) if duration is not None else None
+    segments: list[TranscriptSegment] = []
+    repaired = 0
+    previous_start = 0.0
+
+    for index, raw in enumerate(usable):
+        text = str(raw.get("text") or "").strip()
+        raw_start = _timestamp(raw.get("start", raw.get("start_time")))
+        start = max(0.0, raw_start if raw_start is not None else previous_start)
+        if start < previous_start:
+            start = previous_start
+            repaired += 1
+        if raw_start is None or raw_start < 0:
+            repaired += 1
+
+        raw_end = _timestamp(raw.get("end", raw.get("end_time")))
+        end = raw_end
+        if end is None or end < start:
+            next_start = next(
+                (
+                    candidate
+                    for later in usable[index + 1 :]
+                    if (candidate := _timestamp(later.get("start", later.get("start_time"))))
+                    is not None
+                    and candidate >= start
+                ),
+                None,
+            )
+            end = next_start if next_start is not None else duration
+            end = max(start, end if end is not None else start)
+            repaired += 1
+
+        speaker = str(raw.get("speaker", raw.get("speaker_id", ""))).strip() or None
+        segments.append(TranscriptSegment(start, end, text, speaker))
+        previous_start = start
+
+    if repaired:
+        logger.warning("Repaired %d invalid MLX transcript timestamp value(s)", repaired)
+    if segments:
+        return segments
+
+    text = str(payload.get("text", "")).strip()
+    return [TranscriptSegment(0, duration or 0, text)] if text else []
 
 
 class MlxAudioClient:
@@ -43,19 +108,9 @@ class MlxAudioClient:
                 raise RuntimeError(self._connection_error_message()) from exc
         response.raise_for_status()
         payload = response.json()
-        raw_segments = payload.get("segments") or []
-        if raw_segments:
-            return [
-                TranscriptSegment(
-                    float(s.get("start", s.get("start_time", 0))),
-                    float(s.get("end", s.get("end_time", 0))),
-                    str(s.get("text", "")),
-                    str(s.get("speaker", s.get("speaker_id", ""))) or None,
-                )
-                for s in raw_segments
-            ]
-        text = str(payload.get("text", "")).strip()
-        return [TranscriptSegment(0, 0, text)] if text else []
+        if not isinstance(payload, dict):
+            raise RuntimeError("MLX Audio returned an invalid transcription response")
+        return _normalize_transcript_segments(payload)
 
     def synthesize(
         self, segments: list[TranscriptSegment], output_path: Path, language: str
