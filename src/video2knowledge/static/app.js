@@ -580,12 +580,16 @@ function renderDownloadHistory(entries) {
 }
 
 async function pollDownloadHistory() {
+  clearTimeout(historyPollTimer);
+  historyPollTimer = null;
   try {
     const entries = await requestJson("/api/download-history?limit=5000");
     renderDownloadHistory(entries);
   } catch (error) {
     downloadHistorySummary.textContent = "History unavailable";
     downloadHistoryList.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  } finally {
+    scheduleHistoryPolling();
   }
 }
 
@@ -1214,9 +1218,13 @@ async function submitVideo(video) {
 }
 
 async function pollJobs() {
+  clearTimeout(jobPollTimer);
+  jobPollTimer = null;
+  const wasPolling = jobsPollingActive;
   try {
     const data = await requestJson("/api/jobs?limit=5000");
     latestJobs = data;
+    jobsPollingActive = data.some(jobNeedsPolling);
     const existingJobIds = new Set(data.map((job) => job.id));
     [...selectedQueueJobs].forEach((jobId) => {
       if (!existingJobIds.has(jobId)) selectedQueueJobs.delete(jobId);
@@ -1471,9 +1479,13 @@ async function pollJobs() {
     });
     updateQueueSelectionControls();
     renderRequestProgress(data);
+    if (wasPolling && !jobsPollingActive) pollDownloadHistory();
   } catch (error) {
     queueSummary.textContent = "Queue unavailable";
     jobs.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  } finally {
+    scheduleJobPolling();
+    scheduleHistoryPolling();
   }
 }
 
@@ -1697,10 +1709,15 @@ function renderMlxStatus(status) {
 }
 
 async function pollMlxStatus() {
+  clearTimeout(mlxPollTimer);
+  mlxPollTimer = null;
   try {
-    renderMlxStatus(await requestJson("/api/mlx/status"));
+    const status = await requestJson("/api/mlx/status");
+    renderMlxStatus(status);
+    scheduleMlxPolling(status);
   } catch (error) {
     select("#mlx-message").textContent = error.message;
+    scheduleMlxPolling(null);
   }
 }
 
@@ -1721,7 +1738,9 @@ select("#mlx-start").addEventListener("click", async () => {
   settingsStatus.textContent = "Saving settings…";
   try {
     await saveSettings();
-    renderMlxStatus(await requestJson("/api/mlx/start", { method: "POST" }));
+    const status = await requestJson("/api/mlx/start", { method: "POST" });
+    renderMlxStatus(status);
+    scheduleMlxPolling(status);
   } catch (error) {
     settingsStatus.textContent = error.message;
   }
@@ -1729,7 +1748,9 @@ select("#mlx-start").addEventListener("click", async () => {
 
 select("#mlx-stop").addEventListener("click", async () => {
   try {
-    renderMlxStatus(await requestJson("/api/mlx/stop", { method: "POST" }));
+    const status = await requestJson("/api/mlx/stop", { method: "POST" });
+    renderMlxStatus(status);
+    scheduleMlxPolling(status);
   } catch (error) {
     settingsStatus.textContent = error.message;
   }
@@ -1738,13 +1759,25 @@ select("#mlx-stop").addEventListener("click", async () => {
 select("#charging-only").addEventListener("change", renderResults);
 select("#tag-filter").addEventListener("input", renderResults);
 select("#refresh-download-history").addEventListener("click", pollDownloadHistory);
-addVideosTab.addEventListener("click", () => activateAppTab("add"));
-downloadHistoryTab.addEventListener("click", () => activateAppTab("history"));
+addVideosTab.addEventListener("click", () => {
+  activateAppTab("add");
+  scheduleHistoryPolling();
+});
+downloadHistoryTab.addEventListener("click", () => {
+  activateAppTab("history");
+  if (!isStaticPreview) Promise.all([pollJobs(), pollDownloadHistory()]);
+});
 [addVideosTab, downloadHistoryTab].forEach((tab) => {
   tab.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
     event.preventDefault();
-    activateAppTab(tab === addVideosTab ? "history" : "add", true);
+    const target = tab === addVideosTab ? "history" : "add";
+    activateAppTab(target, true);
+    if (!isStaticPreview && target === "history") {
+      Promise.all([pollJobs(), pollDownloadHistory()]);
+    } else if (target === "add") {
+      scheduleHistoryPolling();
+    }
   });
 });
 downloadHistoryToggle.addEventListener("click", () => {
@@ -1803,6 +1836,8 @@ settingsToggle.addEventListener("click", () => {
   settingsToggle.setAttribute("aria-expanded", String(!expanded));
   settingsContent.hidden = expanded;
   select(".settings-toggle-label").textContent = expanded ? "Expand" : "Collapse";
+  if (!expanded && !isStaticPreview) pollMlxStatus();
+  if (expanded) scheduleMlxPolling(null);
 });
 select("#login").addEventListener("click", async () => {
   try {
@@ -1828,12 +1863,12 @@ if (isStaticPreview) {
   renderRequestProgress(latestJobs);
   document.addEventListener("click", noteUserInteraction, { passive: true });
   document.addEventListener("keydown", noteUserInteraction, { passive: true });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopNetworkPolling();
+    else refreshNetworkState();
+  });
+  window.addEventListener("focus", () => refreshNetworkState());
   loadSettings();
-  pollJobs();
-  pollDownloadHistory();
-  pollMlxStatus();
-  setInterval(pollJobs, 2500);
-  setInterval(pollDownloadHistory, 5000);
-  setInterval(pollMlxStatus, 2500);
+  refreshNetworkState(true);
   setInterval(requestProgressWatchdog, 60 * 1000);
 }

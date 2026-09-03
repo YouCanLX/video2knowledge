@@ -120,6 +120,17 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "data-drag-request" in script.text
     assert 'addEventListener("pointermove", move)' in script.text
     assert "request.position" in script.text
+    assert "`/api/runtime/preflight?synthesize=${String(synthesize)}`" in script.text
+    assert "confirmProcessingServices" in script.text
+    assert "showPreflightConfirmation" in script.text
+    assert "jobsPollingActive" in script.text
+    assert "job.session_active" in script.text
+    assert "scheduleJobPolling" in script.text
+    assert "stopNetworkPolling" in script.text
+    assert 'addEventListener("visibilitychange"' in script.text
+    assert "setInterval(pollJobs" not in script.text
+    assert "setInterval(pollDownloadHistory" not in script.text
+    assert "setInterval(pollMlxStatus" not in script.text
     assert 'requestJson("/api/download-history?limit=5000")' in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
