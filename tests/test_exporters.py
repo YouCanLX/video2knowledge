@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from video2knowledge.exporters import (
     format_clock,
@@ -10,7 +11,11 @@ from video2knowledge.exporters import (
     write_bundle,
 )
 from video2knowledge.models import Enrichment, KnowledgeDocument, TranscriptSegment, VideoItem
-from video2knowledge.naming import library_filename_stem, library_stem
+from video2knowledge.naming import (
+    library_filename_stem,
+    library_relative_directory,
+    library_stem,
+)
 
 
 def document():
@@ -79,13 +84,29 @@ def test_library_stem_contains_author_title_and_video_id():
     assert library_stem(document().video) == "Author_Test Title_BV1test"
 
 
-def test_collection_is_added_to_filename_but_not_directory_name():
+def test_collection_is_added_to_filename_stem():
     item = document().video
     item.collection_id = 12
     item.collection_title = "Trading/Course"
 
     assert library_stem(item) == "Author_Test Title_BV1test"
     assert library_filename_stem(item) == "Author_Trading-Course_Test Title_BV1test"
+
+
+def test_library_directory_uses_author_and_collection_hierarchy():
+    item = document().video
+    item.collection_id = 12
+    item.collection_title = "Trading/Course"
+
+    assert library_relative_directory(item) == (
+        Path("Author") / "Trading-Course" / "Author_Trading-Course_Test Title_BV1test"
+    )
+
+
+def test_library_directory_without_collection_uses_author_hierarchy():
+    assert library_relative_directory(document().video) == Path(
+        "Author/Author_Test Title_BV1test"
+    )
 
 
 def test_bundle_uses_collection_filename_inside_unchanged_directory(tmp_path):

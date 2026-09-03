@@ -11,7 +11,7 @@ from .apple_music import export_apple_music
 from .config import Settings
 from .exporters import parse_markdown_text, write_bundle
 from .models import KnowledgeDocument, TranscriptSegment, VideoItem
-from .naming import library_stem
+from .naming import library_filename_stem, library_relative_directory
 from .qr_login import bili_dl_login_and_save, login_and_save
 from .repository import LibraryRepository
 from .services import build_services
@@ -115,8 +115,8 @@ def speak(
     segments = [TranscriptSegment(0, 0, paragraph) for paragraph in paragraphs]
     source_id = re.sub(r"\W+", "-", markdown_file.stem).strip("-") or "knowledge-audio"
     item = VideoItem("markdown", source_id, title, markdown_file.resolve().as_uri(), author)
-    stem = library_stem(item)
-    output_dir = settings.library_dir / stem
+    stem = library_filename_stem(item)
+    output_dir = settings.library_dir / library_relative_directory(item)
     wav = services.audio.synthesize(segments, output_dir / f"{stem}.wav", language)
     document = KnowledgeDocument(item, segments, language=language, audio_path=wav)
     outputs = write_bundle(document, output_dir)

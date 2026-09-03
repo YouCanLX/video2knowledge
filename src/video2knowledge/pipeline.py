@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .exporters import write_bundle
 from .models import JobStatus, KnowledgeDocument, VideoItem
-from .naming import library_filename_stem, library_stem
+from .naming import library_filename_stem, library_relative_directory
 from .ports import SpeechToText, TextEnricher, TextToSpeech, VideoProvider
 from .repository import LibraryRepository
 
@@ -98,9 +98,8 @@ class Pipeline:
                     summary=["LLM enrichment is unavailable; the full transcript was preserved."]
                 )
             document = KnowledgeDocument(item, segments, enrichment, language)
-            stem = library_stem(item)
             filename_stem = library_filename_stem(item)
-            output_dir = self.library_dir / stem
+            output_dir = self.library_dir / library_relative_directory(item)
             output_dir.mkdir(parents=True, exist_ok=True)
             synthesized: Path | None = None
             if synthesize:

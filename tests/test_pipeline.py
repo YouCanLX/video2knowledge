@@ -59,7 +59,13 @@ def test_serial_runner_never_downloads_concurrently(tmp_path):
         await runner.queue.join()
         assert provider.peak == 1
         assert all(repo.get_job(job_id)["status"] == "complete" for job_id in ids)
-        assert (tmp_path / "library" / "UnknownCreator_A_A" / "UnknownCreator_A_A.md").exists()
+        assert (
+            tmp_path
+            / "library"
+            / "UnknownCreator"
+            / "UnknownCreator_A_A"
+            / "UnknownCreator_A_A.md"
+        ).exists()
         runner._worker.cancel()
 
     asyncio.run(scenario())
@@ -97,7 +103,7 @@ def test_pipeline_reuses_cached_media_unless_forced(tmp_path):
     asyncio.run(scenario())
 
 
-def test_collection_tts_filename_changes_without_changing_library_directory(tmp_path):
+def test_collection_outputs_use_author_and_collection_directory_hierarchy(tmp_path):
     async def scenario():
         repo = LibraryRepository(tmp_path / "db.sqlite")
         pipeline = Pipeline(
@@ -123,14 +129,20 @@ def test_collection_tts_filename_changes_without_changing_library_directory(tmp_
         return await pipeline.run(job_id, item, synthesize=True)
 
     outputs = asyncio.run(scenario())
-    unchanged_directory = tmp_path / "library" / "Creator_Lesson_BV1COLLECTION"
+    output_directory = (
+        tmp_path
+        / "library"
+        / "Creator"
+        / "Course"
+        / "Creator_Course_Lesson_BV1COLLECTION"
+    )
 
-    assert unchanged_directory.is_dir()
+    assert output_directory.is_dir()
     assert outputs["audio"] == str(
-        unchanged_directory / "Creator_Course_Lesson_BV1COLLECTION-tts.wav"
+        output_directory / "Creator_Course_Lesson_BV1COLLECTION-tts.wav"
     )
     assert outputs["markdown"] == str(
-        unchanged_directory / "Creator_Course_Lesson_BV1COLLECTION.md"
+        output_directory / "Creator_Course_Lesson_BV1COLLECTION.md"
     )
 
 
