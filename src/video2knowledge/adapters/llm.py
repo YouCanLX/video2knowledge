@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,6 +17,12 @@ if TYPE_CHECKING:
     from ..config import Settings
 
 ENRICHMENT_FIELDS = ("summary", "insights", "suggestions", "questions")
+MACOS_CODEX_CANDIDATES = (
+    "/Applications/ChatGPT.app/Contents/Resources/codex",
+    "/Applications/Codex.app/Contents/Resources/codex",
+    "~/Applications/ChatGPT.app/Contents/Resources/codex",
+    "~/Applications/Codex.app/Contents/Resources/codex",
+)
 ENRICHMENT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -60,6 +67,18 @@ def _parse_enrichment(content: str) -> Enrichment:
     return Enrichment(**values)
 
 
+def _resolve_codex_executable(configured: str) -> str | None:
+    """Resolve Codex from PATH or the standard macOS application bundles."""
+    executable = shutil.which(configured)
+    if executable or configured != "codex":
+        return executable
+    for candidate in MACOS_CODEX_CANDIDATES:
+        path = Path(candidate).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
+
+
 class OpenAICompatibleEnricher:
     def __init__(self, base_url: str, model: str):
         self.base_url, self.model = base_url.rstrip("/"), model
@@ -94,7 +113,7 @@ class CodexCliEnricher:
         self.timeout_seconds = timeout_seconds
 
     async def enrich(self, title: str, text: str, language: str) -> Enrichment:
-        executable = shutil.which(self.executable)
+        executable = _resolve_codex_executable(self.executable)
         if not executable:
             raise RuntimeError(f"Codex CLI was not found: {self.executable}")
 
