@@ -21,12 +21,80 @@ const creatorContent = select("#creator-content");
 const settingsStatus = select("#settings-status");
 const settingsToggle = select("#settings-toggle");
 const settingsContent = select("#settings-content");
+const requestProgress = select("#request-progress");
+const requestProgressKicker = select("#request-progress-kicker");
+const requestProgressTitle = select("#request-progress-title");
+const requestProgressBar = select("#request-progress-bar");
+const requestProgressCounts = select("#request-progress-counts");
+const requestProgressDetail = select("#request-progress-detail");
 const isStaticPreview = window.location.protocol === "file:";
 let searchResults = [];
 const expandedFileJobs = new Set();
 const expandedQueueJobs = new Set();
 const selectedQueueJobs = new Set();
 let creatorState = null;
+let trackedRequest = null;
+
+function beginRequestProgress(label, message = "Preparing the request…") {
+  trackedRequest = { label, jobIds: null };
+  requestProgress.hidden = false;
+  requestProgress.className = "request-progress active";
+  requestProgressKicker.textContent = "Submitting request";
+  requestProgressTitle.textContent = label;
+  requestProgressBar.removeAttribute("value");
+  requestProgressCounts.textContent = message;
+  requestProgressDetail.textContent = "Waiting for the jobs to enter the processing queue.";
+}
+
+function trackRequestJobs(jobIds, label) {
+  trackedRequest = { label, jobIds: new Set(jobIds) };
+  requestProgress.hidden = false;
+  requestProgress.className = "request-progress active";
+  requestProgressKicker.textContent = "Request progress";
+  requestProgressTitle.textContent = label;
+  requestProgressBar.value = 0;
+  requestProgressCounts.textContent = `0 of ${jobIds.length} finished`;
+  requestProgressDetail.textContent = "Waiting for queue status…";
+}
+
+function failRequestProgress(message) {
+  requestProgress.hidden = false;
+  requestProgress.className = "request-progress failed";
+  requestProgressKicker.textContent = "Request failed";
+  requestProgressBar.value = 100;
+  requestProgressCounts.textContent = message;
+  requestProgressDetail.textContent = "No additional jobs were added by this request.";
+  trackedRequest = null;
+}
+
+function renderRequestProgress(allJobs) {
+  if (!trackedRequest?.jobIds) return;
+  const requestJobs = allJobs.filter((job) => trackedRequest.jobIds.has(job.id));
+  const counts = { complete: 0, failed: 0, queued: 0, running: 0 };
+  requestJobs.forEach((job) => {
+    if (job.status in counts && job.status !== "running") counts[job.status] += 1;
+    else counts.running += 1;
+  });
+  const total = trackedRequest.jobIds.size;
+  const finished = counts.complete + counts.failed;
+  const unavailable = total - requestJobs.length;
+  const percent = total ? Math.round((finished / total) * 100) : 0;
+  requestProgressBar.value = percent;
+  requestProgressCounts.textContent = `${finished} of ${total} finished · ${percent}%`;
+  requestProgressDetail.textContent = [
+    `${counts.complete} complete`,
+    `${counts.failed} failed`,
+    `${counts.running} running`,
+    `${counts.queued} queued`,
+    unavailable ? `${unavailable} pending status` : "",
+  ].filter(Boolean).join(" · ");
+  if (finished === total) {
+    requestProgress.className = counts.failed
+      ? "request-progress finished-with-errors"
+      : "request-progress finished";
+    requestProgressKicker.textContent = counts.failed ? "Request finished with failures" : "Request complete";
+  }
+}
 
 function updateQueueSelectionControls() {
   const visible = [...jobs.querySelectorAll("[data-select-job]:not(:disabled)")];
@@ -440,6 +508,8 @@ async function submitCreatorBatch(scope) {
   }
   state.batching = true;
   creatorStatus.textContent = "Expanding the selection across all pages…";
+  const requestLabel = `${state.creator.name} · ${scope === "all-collections" ? "all collections" : scope === "all-uploads" ? "all uploads" : "selected videos"}`;
+  beginRequestProgress(requestLabel, "Expanding the selection across all pages…");
   renderCreatorBrowser();
   try {
     const data = await requestJson("/api/jobs/creator-batch", {
@@ -448,11 +518,13 @@ async function submitCreatorBatch(scope) {
       body: JSON.stringify(payload),
     });
     creatorStatus.textContent = `${data.submitted} unique videos added to the serial queue.`;
+    trackRequestJobs(data.job_ids, requestLabel);
     state.selectedCollections.clear();
     state.selectedVideos.clear();
     await pollJobs();
   } catch (error) {
     creatorStatus.textContent = error.message;
+    failRequestProgress(error.message);
   } finally {
     state.batching = false;
     renderCreatorBrowser();
@@ -589,6 +661,7 @@ select("#url-form").addEventListener("submit", async (event) => {
   const button = event.submitter;
   button.disabled = true;
   urlStatus.textContent = "Resolving video…";
+  beginRequestProgress("Bilibili video", "Resolving video details…");
   try {
     const data = await requestJson("/api/jobs/url", {
       method: "POST",
@@ -596,25 +669,30 @@ select("#url-form").addEventListener("submit", async (event) => {
       body: jobPayload({ url: select("#video-url").value }),
     });
     urlStatus.textContent = `Added to queue: ${data.video.title}`;
+    trackRequestJobs([data.id], data.video.title);
     select("#video-url").value = "";
     await pollJobs();
   } catch (error) {
     urlStatus.textContent = error.message;
+    failRequestProgress(error.message);
   } finally {
     button.disabled = false;
   }
 });
 
 async function submitVideo(video) {
+  beginRequestProgress(video.title, "Adding video to the queue…");
   try {
-    await requestJson("/api/jobs", {
+    const data = await requestJson("/api/jobs", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: jobPayload({ video }),
     });
+    trackRequestJobs([data.id], video.title);
     await pollJobs();
   } catch (error) {
     urlStatus.textContent = error.message;
+    failRequestProgress(error.message);
   }
 }
 
@@ -813,6 +891,7 @@ async function pollJobs() {
       if (fileList.matches(":hover")) expand();
     });
     updateQueueSelectionControls();
+    renderRequestProgress(data);
   } catch (error) {
     queueSummary.textContent = "Queue unavailable";
     jobs.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
@@ -1013,6 +1092,10 @@ selectVisibleJobs.addEventListener("change", () => {
   updateQueueSelectionControls();
 });
 deleteSelectedJobs.addEventListener("click", deleteSelectedJobRecords);
+select("#request-progress-close").addEventListener("click", () => {
+  requestProgress.hidden = true;
+  trackedRequest = null;
+});
 select("#expand-all-jobs").addEventListener("click", () => {
   jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
     expandedQueueJobs.add(button.dataset.toggleJob);

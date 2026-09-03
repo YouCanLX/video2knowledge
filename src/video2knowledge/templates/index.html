@@ -259,6 +259,20 @@
       </section>
     </main>
 
+    <section class="request-progress" id="request-progress" role="status" aria-live="polite" hidden>
+      <div class="request-progress-heading">
+        <div>
+          <small id="request-progress-kicker">Latest request</small>
+          <strong id="request-progress-title">Preparing request…</strong>
+        </div>
+        <button type="button" class="request-progress-close" id="request-progress-close"
+          aria-label="Close request progress">×</button>
+      </div>
+      <progress id="request-progress-bar" max="100"></progress>
+      <div class="request-progress-counts" id="request-progress-counts">Submitting…</div>
+      <small id="request-progress-detail">The request is being prepared.</small>
+    </section>
+
     <footer>
       Markdown is the source of truth · LRC/JSON preserve synchronized timelines ·
       One video downloads at a time

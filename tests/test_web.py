@@ -77,6 +77,9 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="settings-toggle"' in page.text
     assert 'aria-controls="settings-content"' in page.text
     assert 'id="settings-content" hidden' in page.text
+    assert 'id="request-progress"' in page.text
+    assert 'id="request-progress-bar"' in page.text
+    assert 'id="request-progress-close"' in page.text
     assert 'href="../static/app.css"' in page.text
     assert 'id="preview-warning"' in page.text
     assert stylesheet.status_code == 200
@@ -87,6 +90,8 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert '"/api/jobs/batch-delete"' in script.text
     assert 'requestJson("/api/jobs?limit=5000")' in script.text
     assert 'filter === "running"' in script.text
+    assert "trackRequestJobs(data.job_ids, requestLabel)" in script.text
+    assert "renderRequestProgress(data)" in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
     assert 'data-batch-scope="all-collections"' in script.text
