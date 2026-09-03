@@ -34,7 +34,7 @@ def document():
             TranscriptSegment(1.25, 3.5, "First sentence"),
             TranscriptSegment(64, 68, "Second sentence", "S1"),
         ],
-        Enrichment(summary=["Key point"], questions=["Why?"]),
+        Enrichment(summary=["Key point", "Second point"], questions=["Why?"]),
     )
 
 
@@ -56,11 +56,25 @@ def test_render_outputs_include_timeline_and_enrichment():
     assert "## Core Summary" in markdown
     assert "background-color:#fff7d6;color:#4a3b00" in markdown
     assert "border-left:5px solid #d9a900" in markdown
+    assert 'list-style-type:disc' in markdown
+    assert '<li style="margin:0.35em 0;padding-left:0.2em">Key point</li>' in markdown
+    assert '<li style="margin:0.35em 0;padding-left:0.2em">Second point</li>' in markdown
+    assert "\n- Key point\n" not in markdown
     assert 'video_created_at: "2025-01-01T00:00:00+00:00"' in markdown
     assert "Video created: **2025-01-01T00:00:00+00:00**" in markdown
     assert "`00:00:01.250`" in markdown
     assert "[date:2025-01-01T00:00:00+00:00]" in lyrics
     assert "[01:04.00]Second sentence" in lyrics
+
+
+def test_render_markdown_escapes_enrichment_list_content():
+    doc = document()
+    doc.enrichment.summary = ["First <claim>", "Second & next"]
+
+    markdown = render_markdown(doc)
+
+    assert ">First &lt;claim&gt;</li>" in markdown
+    assert ">Second &amp; next</li>" in markdown
 
 
 def test_write_bundle_includes_video_creation_metadata(tmp_path):

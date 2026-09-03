@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime
+from html import escape
 from pathlib import Path
 
 from .models import KnowledgeDocument, TranscriptSegment
@@ -110,9 +111,16 @@ def render_markdown(document: KnowledgeDocument) -> str:
                 f"## {heading}",
                 "",
                 f'<div style="{card_style}">',
+                (
+                    '<ul style="margin:0;padding-left:1.45em;'
+                    'list-style-type:disc;list-style-position:outside">'
+                ),
             ]
-            parts.extend(f"- {value}" for value in values)
-            parts += ["</div>", ""]
+            parts.extend(
+                f'<li style="margin:0.35em 0;padding-left:0.2em">{escape(value)}</li>'
+                for value in values
+            )
+            parts += ["</ul>", "</div>", ""]
     parts += ["## Full Transcript with Timeline", ""]
     for segment in document.segments:
         speaker = f"**{segment.speaker}** " if segment.speaker else ""
