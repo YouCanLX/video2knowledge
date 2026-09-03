@@ -78,8 +78,6 @@ def test_existing_jobs_database_gains_restart_parameter_columns(tmp_path):
     connection.close()
 
     repo = LibraryRepository(database)
-    columns = {
-        row["name"] for row in repo.connection.execute("PRAGMA table_info(jobs)").fetchall()
-    }
+    columns = {row["name"] for row in repo.connection.execute("PRAGMA table_info(jobs)").fetchall()}
 
     assert {"language", "synthesize", "force_refresh"}.issubset(columns)

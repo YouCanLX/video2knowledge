@@ -153,8 +153,7 @@ def write_bundle(document: KnowledgeDocument, directory: Path) -> dict[str, Path
     directory.mkdir(parents=True, exist_ok=True)
     slug = library_filename_stem(document.video)
     md_path, lrc_path, json_path, metadata_path = (
-        directory / f"{slug}{suffix}"
-        for suffix in (".md", ".lrc", ".json", ".metadata.json")
+        directory / f"{slug}{suffix}" for suffix in (".md", ".lrc", ".json", ".metadata.json")
     )
     video_created_at = format_video_created_at(document.video.published_at)
     md_path.write_text(render_markdown(document), encoding="utf-8")

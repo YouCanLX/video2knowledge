@@ -52,14 +52,10 @@ def library_filename_stem(item: VideoItem, max_bytes: int = 220) -> str:
 
 def library_relative_directory(item: VideoItem, max_component_bytes: int = 220) -> Path:
     """Build the author/collection/output-directory hierarchy for a video."""
-    author = _truncate_utf8(
-        safe_component(item.author, "UnknownCreator"), max_component_bytes
-    )
+    author = _truncate_utf8(safe_component(item.author, "UnknownCreator"), max_component_bytes)
     leaf = library_filename_stem(item, max_bytes=max_component_bytes)
     if item.collection_title or item.collection_id:
         collection = item.collection_title or f"Collection-{item.collection_id}"
-        collection = _truncate_utf8(
-            safe_component(collection, "Collection"), max_component_bytes
-        )
+        collection = _truncate_utf8(safe_component(collection, "Collection"), max_component_bytes)
         return Path(author) / collection / leaf
     return Path(author) / leaf

@@ -56,7 +56,7 @@ def test_render_outputs_include_timeline_and_enrichment():
     assert "## Core Summary" in markdown
     assert "background-color:#fff7d6;color:#4a3b00" in markdown
     assert "border-left:5px solid #d9a900" in markdown
-    assert 'list-style-type:disc' in markdown
+    assert "list-style-type:disc" in markdown
     assert '<li style="margin:0.35em 0;padding-left:0.2em">Key point</li>' in markdown
     assert '<li style="margin:0.35em 0;padding-left:0.2em">Second point</li>' in markdown
     assert "\n- Key point\n" not in markdown
@@ -69,7 +69,7 @@ def test_render_outputs_include_timeline_and_enrichment():
 
 def test_render_markdown_escapes_enrichment_list_content():
     doc = document()
-    unsafe = 'First & <claim> "quoted" \'single\' </li><li>injected'
+    unsafe = "First & <claim> \"quoted\" 'single' </li><li>injected"
     doc.enrichment.summary = [unsafe]
     doc.enrichment.insights = [unsafe]
     doc.enrichment.suggestions = [unsafe]
@@ -128,9 +128,7 @@ def test_library_directory_uses_author_and_collection_hierarchy():
 
 
 def test_library_directory_without_collection_uses_author_hierarchy():
-    assert library_relative_directory(document().video) == Path(
-        "Author/Author_Test Title_BV1test"
-    )
+    assert library_relative_directory(document().video) == Path("Author/Author_Test Title_BV1test")
 
 
 def test_bundle_uses_collection_filename_inside_unchanged_directory(tmp_path):
