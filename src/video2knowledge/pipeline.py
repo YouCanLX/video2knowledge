@@ -200,29 +200,40 @@ class SerialJobRunner:
         force_refresh: bool = False,
     ) -> str:
         self.start()
-        job_id = self.pipeline.repository.create_job(
-            item, language, synthesize, force_refresh
-        )
+        job_id = self.pipeline.repository.create_job(item, language, synthesize, force_refresh)
         self._controls[job_id] = _JobControl()
         await self.queue.put((job_id, item, language, synthesize, force_refresh))
         return job_id
 
     async def restart(self, job_id: str) -> dict:
-        job = self.pipeline.repository.get_job(job_id)
-        if not job:
-            raise KeyError(job_id)
-        if JobStatus(job["status"]) != JobStatus.FAILED:
-            raise ValueError("Only failed jobs can be restarted")
+        return (await self.restart_many([job_id]))[0]
 
-        item = VideoItem(**job["source"])
-        language = str(job.get("language") or "zh-CN")
-        synthesize = bool(job.get("synthesize"))
-        force_refresh = bool(job.get("force_refresh"))
+    async def restart_many(self, job_ids: list[str]) -> list[dict]:
+        unique_ids = list(dict.fromkeys(job_ids))
+        jobs: list[dict] = []
+        for job_id in unique_ids:
+            job = self.pipeline.repository.get_job(job_id)
+            if not job:
+                raise KeyError(job_id)
+            jobs.append(job)
+
+        invalid = [job["id"] for job in jobs if JobStatus(job["status"]) != JobStatus.FAILED]
+        if invalid:
+            raise ValueError(f"Only failed jobs can be restarted: {invalid[0]}")
+
         self.start()
-        self._controls[job_id] = _JobControl()
-        self.pipeline.repository.restart_job(job_id)
-        await self.queue.put((job_id, item, language, synthesize, force_refresh))
-        return self.pipeline.repository.get_job(job_id) or job
+        restarted: list[dict] = []
+        for job in jobs:
+            job_id = str(job["id"])
+            item = VideoItem(**job["source"])
+            language = str(job.get("language") or "zh-CN")
+            synthesize = bool(job.get("synthesize"))
+            force_refresh = bool(job.get("force_refresh"))
+            self._controls[job_id] = _JobControl()
+            self.pipeline.repository.restart_job(job_id)
+            await self.queue.put((job_id, item, language, synthesize, force_refresh))
+            restarted.append(self.pipeline.repository.get_job(job_id) or job)
+        return restarted
 
     def pause(self, job_id: str) -> dict:
         job = self.pipeline.repository.get_job(job_id)

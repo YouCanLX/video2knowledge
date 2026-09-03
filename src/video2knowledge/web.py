@@ -178,9 +178,7 @@ async def _expand_creator_batch(provider, body: CreatorBatchRequest) -> list[Vid
             page_size=20,
         )
         collections = [
-            CollectionSelection(
-                kind=row["kind"], id=row["id"], title=str(row.get("title") or "")
-            )
+            CollectionSelection(kind=row["kind"], id=row["id"], title=str(row.get("title") or ""))
             for row in rows
         ]
     if body.all_uploads:
@@ -409,6 +407,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @app.post("/api/jobs/batch-restart", status_code=202)
+    async def batch_restart_jobs(body: DeleteJobsRequest):
+        try:
+            restarted = await runner.restart_many(body.job_ids)
+        except KeyError as exc:
+            raise HTTPException(404, "Job not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        job_ids = [str(job["id"]) for job in restarted]
+        return {"restarted": job_ids, "count": len(job_ids)}
+
     def output_path(job_id: str, output_key: str) -> Path:
         job = repository.get_job(job_id)
         if not job:
@@ -488,8 +497,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def delete_download_history(body: DeleteDownloadHistoryRequest):
         source_ids = list(dict.fromkeys(body.source_ids))
         entries = {
-            source_id: repository.get_download_history(source_id)
-            for source_id in source_ids
+            source_id: repository.get_download_history(source_id) for source_id in source_ids
         }
         missing = [source_id for source_id, entry in entries.items() if entry is None]
         active = [

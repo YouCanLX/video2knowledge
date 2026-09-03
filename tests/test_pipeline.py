@@ -86,11 +86,7 @@ def test_serial_runner_never_downloads_concurrently(tmp_path):
         assert provider.peak == 1
         assert all(repo.get_job(job_id)["status"] == "complete" for job_id in ids)
         assert (
-            tmp_path
-            / "library"
-            / "UnknownCreator"
-            / "UnknownCreator_A_A"
-            / "UnknownCreator_A_A.md"
+            tmp_path / "library" / "UnknownCreator" / "UnknownCreator_A_A" / "UnknownCreator_A_A.md"
         ).exists()
         runner._worker.cancel()
 
@@ -184,9 +180,7 @@ def test_runner_restarts_failed_job_with_original_options(tmp_path):
         runner = SerialJobRunner(pipeline)
         item = VideoItem("bilibili", "RESTART", "Restart", "https://example.test/restart")
 
-        job_id = await runner.submit(
-            item, language="en-US", synthesize=True, force_refresh=True
-        )
+        job_id = await runner.submit(item, language="en-US", synthesize=True, force_refresh=True)
         await runner.queue.join()
         assert repo.get_job(job_id)["status"] == "failed"
 
@@ -202,6 +196,48 @@ def test_runner_restarts_failed_job_with_original_options(tmp_path):
         assert completed["force_refresh"] is True
         assert "audio" in completed["outputs"]
         runner._worker.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_runner_batch_restart_validates_every_job_before_requeueing(tmp_path):
+    async def scenario():
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            FakeProvider(),
+            FakeSTT(),
+            FakeLLM(),
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        runner = SerialJobRunner(pipeline)
+        runner.start = lambda: None
+        failed = repo.create_job(
+            VideoItem("bilibili", "FAILED", "Failed", "https://example.test/failed")
+        )
+        completed = repo.create_job(
+            VideoItem("bilibili", "DONE", "Done", "https://example.test/done")
+        )
+        repo.update_job(failed, "failed", 0.4, "failed")
+        repo.update_job(completed, "complete", 1)
+
+        try:
+            await runner.restart_many([failed, completed])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("mixed-status batch should be rejected")
+
+        assert repo.get_job(failed)["status"] == "failed"
+        assert runner.queue.empty()
+
+        repo.update_job(completed, "failed", 0.7, "failed")
+        restarted = await runner.restart_many([failed, completed, failed])
+        assert [job["id"] for job in restarted] == [failed, completed]
+        assert all(job["status"] == "queued" for job in restarted)
+        assert runner.queue.qsize() == 2
 
     asyncio.run(scenario())
 
@@ -265,20 +301,12 @@ def test_collection_outputs_use_author_and_collection_directory_hierarchy(tmp_pa
 
     outputs = asyncio.run(scenario())
     output_directory = (
-        tmp_path
-        / "library"
-        / "Creator"
-        / "Course"
-        / "Creator_Course_Lesson_BV1COLLECTION"
+        tmp_path / "library" / "Creator" / "Course" / "Creator_Course_Lesson_BV1COLLECTION"
     )
 
     assert output_directory.is_dir()
-    assert outputs["audio"] == str(
-        output_directory / "Creator_Course_Lesson_BV1COLLECTION-tts.wav"
-    )
-    assert outputs["markdown"] == str(
-        output_directory / "Creator_Course_Lesson_BV1COLLECTION.md"
-    )
+    assert outputs["audio"] == str(output_directory / "Creator_Course_Lesson_BV1COLLECTION-tts.wav")
+    assert outputs["markdown"] == str(output_directory / "Creator_Course_Lesson_BV1COLLECTION.md")
 
 
 def test_pipeline_ignores_empty_cached_media(tmp_path):

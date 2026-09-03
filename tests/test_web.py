@@ -392,6 +392,60 @@ def test_failed_job_can_be_restarted_through_api(tmp_path, monkeypatch):
     assert missing.status_code == 404
 
 
+def test_failed_jobs_can_be_batch_restarted_through_api(tmp_path, monkeypatch):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        runner = app.state.runner
+        repo = runner.pipeline.repository
+        monkeypatch.setattr(runner, "start", lambda: None)
+        failed_ids = []
+        for index in range(2):
+            job_id = repo.create_job(
+                VideoItem(
+                    "bilibili",
+                    f"BV1BATCH{index}",
+                    f"Failed {index}",
+                    f"https://example.test/failed-{index}",
+                )
+            )
+            repo.update_job(job_id, JobStatus.FAILED, 0.5, "failed")
+            failed_ids.append(job_id)
+
+        completed = repo.create_job(
+            VideoItem("bilibili", "BV1DONE", "Done", "https://example.test/done")
+        )
+        repo.update_job(completed, JobStatus.COMPLETE, 1)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            restarted = await client.post(
+                "/api/jobs/batch-restart",
+                json={"job_ids": [failed_ids[0], failed_ids[1], failed_ids[0]]},
+            )
+
+            atomic_failed = repo.create_job(
+                VideoItem(
+                    "bilibili",
+                    "BV1ATOMIC",
+                    "Atomic",
+                    "https://example.test/atomic",
+                )
+            )
+            repo.update_job(atomic_failed, JobStatus.FAILED, 0.5, "failed")
+            invalid = await client.post(
+                "/api/jobs/batch-restart",
+                json={"job_ids": [atomic_failed, completed]},
+            )
+        return restarted, invalid, repo, failed_ids, atomic_failed
+
+    restarted, invalid, repo, failed_ids, atomic_failed = asyncio.run(scenario())
+
+    assert restarted.status_code == 202
+    assert restarted.json() == {"restarted": failed_ids, "count": 2}
+    assert all(repo.get_job(job_id)["status"] == "queued" for job_id in failed_ids)
+    assert invalid.status_code == 409
+    assert repo.get_job(atomic_failed)["status"] == "failed"
+
+
 def test_batch_delete_completed_and_failed_jobs(tmp_path):
     async def scenario():
         app = create_app(Settings.load(tmp_path))
