@@ -61,12 +61,30 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "Video2Knowledge" in page.text
     assert 'id="force-refresh"' in page.text
     assert 'id="creator-form"' in page.text
+    assert 'id="queue-toggle"' in page.text
+    assert 'aria-controls="queue-content"' in page.text
+    assert 'id="queue-summary"' in page.text
+    assert 'id="queue-creator-filter"' in page.text
+    assert 'id="queue-collection-filter"' in page.text
+    assert 'id="queue-year-filter"' in page.text
+    assert 'id="queue-month-filter"' in page.text
+    assert 'id="queue-day-filter"' in page.text
+    assert 'id="expand-all-jobs"' in page.text
+    assert 'id="collapse-all-jobs"' in page.text
+    assert 'id="select-visible-jobs"' in page.text
+    assert 'id="delete-selected-jobs"' in page.text
+    assert 'id="settings-toggle"' in page.text
+    assert 'aria-controls="settings-content"' in page.text
+    assert 'id="settings-content" hidden' in page.text
     assert 'href="../static/app.css"' in page.text
     assert 'id="preview-warning"' in page.text
     assert stylesheet.status_code == 200
     assert script.status_code == 200
     assert "Open File" in script.text
     assert "Show in Finder" in script.text
+    assert "data-quick-delete-job" in script.text
+    assert '"/api/jobs/batch-delete"' in script.text
+    assert 'requestJson("/api/jobs?limit=5000")' in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
     assert 'data-batch-scope="all-collections"' in script.text
@@ -288,6 +306,58 @@ def test_active_job_cannot_be_deleted(tmp_path):
     response = asyncio.run(scenario())
 
     assert response.status_code == 409
+
+
+def test_batch_delete_completed_and_failed_jobs(tmp_path):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        repo = app.state.services.repository
+        completed = repo.create_job(
+            VideoItem("bilibili", "BV1BATCH1", "One", "https://example.test/1")
+        )
+        failed = repo.create_job(
+            VideoItem("bilibili", "BV1BATCH2", "Two", "https://example.test/2")
+        )
+        repo.update_job(completed, JobStatus.COMPLETE, 1)
+        repo.update_job(failed, JobStatus.FAILED, 0.5)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/jobs/batch-delete", json={"job_ids": [completed, failed, completed]}
+            )
+        return response, repo, completed, failed
+
+    response, repo, completed, failed = asyncio.run(scenario())
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 2
+    assert response.json()["deleted"] == [completed, failed]
+    assert repo.get_job(completed) is None
+    assert repo.get_job(failed) is None
+
+
+def test_batch_delete_is_atomic_when_selection_contains_active_job(tmp_path):
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        repo = app.state.services.repository
+        completed = repo.create_job(
+            VideoItem("bilibili", "BV1DONE", "Done", "https://example.test/done")
+        )
+        active = repo.create_job(
+            VideoItem("bilibili", "BV1LIVE", "Live", "https://example.test/live")
+        )
+        repo.update_job(completed, JobStatus.COMPLETE, 1)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/jobs/batch-delete", json={"job_ids": [completed, active]}
+            )
+        return response, repo, completed
+
+    response, repo, completed = asyncio.run(scenario())
+
+    assert response.status_code == 409
+    assert repo.get_job(completed) is not None
 
 
 def test_completed_job_output_can_be_opened_or_revealed(tmp_path, monkeypatch):

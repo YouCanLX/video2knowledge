@@ -14,9 +14,12 @@ def test_job_and_document_round_trip(tmp_path):
         is_charging=True,
     )
     job_id = repo.create_job(item)
+    assert repo.get_job(job_id)["downloaded_at"] is None
+    repo.mark_job_downloaded(job_id)
     repo.update_job(job_id, JobStatus.TRANSCRIBING, 0.5, "working")
     job = repo.get_job(job_id)
     assert job["status"] == "transcribing"
+    assert job["downloaded_at"]
     assert job["source"]["source_id"] == "BV1"
     repo.save_document(item, {"markdown": "/tmp/BV1.md"})
     assert repo.list_documents(tag="Knowledge", charging=True)[0]["title"] == "Title"

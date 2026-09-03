@@ -81,22 +81,93 @@
         <div id="results"><div class="empty">Search results will appear here</div></div>
       </section>
 
-      <aside class="panel" aria-labelledby="queue-heading">
-        <h2 id="queue-heading">Serial Processing Queue</h2>
-        <div class="queue-status" id="queue-status" role="status" aria-live="polite"></div>
-        <div id="jobs"><div class="empty">No jobs yet</div></div>
+      <aside class="panel queue-panel" aria-labelledby="queue-heading">
+        <button
+          class="queue-heading"
+          id="queue-toggle"
+          type="button"
+          aria-expanded="true"
+          aria-controls="queue-content"
+        >
+          <span>
+            <span class="queue-title" id="queue-heading">Serial Processing Queue</span>
+            <small id="queue-summary">No jobs</small>
+          </span>
+          <span class="queue-toggle-label" aria-hidden="true">Collapse</span>
+        </button>
+        <div class="queue-content" id="queue-content">
+          <div class="queue-toolbar">
+            <label for="queue-creator-filter">Creator</label>
+            <select id="queue-creator-filter">
+              <option value="">All creators</option>
+            </select>
+            <label for="queue-collection-filter">Collection</label>
+            <select id="queue-collection-filter">
+              <option value="">All collections</option>
+            </select>
+            <div class="queue-view-actions">
+              <button type="button" class="secondary" id="expand-all-jobs">Expand all</button>
+              <button type="button" class="secondary" id="collapse-all-jobs">Collapse all</button>
+            </div>
+          </div>
+          <div class="queue-date-filters" aria-label="Created date filters">
+            <span>Created</span>
+            <label>
+              <span class="sr-only">Created year</span>
+              <select id="queue-year-filter" aria-label="Created year">
+                <option value="">All years</option>
+              </select>
+            </label>
+            <label>
+              <span class="sr-only">Created month</span>
+              <select id="queue-month-filter" aria-label="Created month" disabled>
+                <option value="">All months</option>
+              </select>
+            </label>
+            <label>
+              <span class="sr-only">Created day</span>
+              <select id="queue-day-filter" aria-label="Created day" disabled>
+                <option value="">All days</option>
+              </select>
+            </label>
+          </div>
+          <div class="queue-bulk-actions">
+            <label class="queue-select-all">
+              <input type="checkbox" id="select-visible-jobs">
+              Select visible history
+            </label>
+            <span id="selected-jobs-count">0 selected</span>
+            <button type="button" class="danger" id="delete-selected-jobs" disabled>
+              Delete selected
+            </button>
+          </div>
+          <div class="queue-status" id="queue-status" role="status" aria-live="polite"></div>
+          <div id="jobs"><div class="empty">No jobs yet</div></div>
+        </div>
       </aside>
 
       <section class="panel settings-panel" aria-labelledby="settings-heading">
-        <div class="settings-heading">
-          <div>
-            <h2 id="settings-heading">Runtime Settings</h2>
-            <p>Changes are saved to the active data directory configuration.</p>
-          </div>
-          <span class="service-badge stopped" id="mlx-state">stopped</span>
-        </div>
+        <button
+          class="settings-heading"
+          id="settings-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="settings-content"
+        >
+          <span>
+            <span class="settings-title" id="settings-heading">Runtime Settings</span>
+            <small>Storage, MLX Audio, and summary generation</small>
+          </span>
+          <span class="settings-heading-actions">
+            <span class="service-label">MLX Audio</span>
+            <span class="service-badge stopped" id="mlx-state">stopped</span>
+            <span class="settings-toggle-label" aria-hidden="true">Expand</span>
+          </span>
+        </button>
 
-        <form id="settings-form">
+        <div class="settings-content" id="settings-content" hidden>
+          <p class="settings-description">Changes are saved to the active data directory configuration.</p>
+          <form id="settings-form">
           <fieldset>
             <legend>Storage</legend>
             <div class="settings-grid">
@@ -175,7 +246,8 @@
             <button type="submit">Save Settings</button>
             <span id="settings-status" role="status" aria-live="polite"></span>
           </div>
-        </form>
+          </form>
+        </div>
       </section>
     </main>
 

@@ -80,6 +80,7 @@ class Pipeline:
                 audio = await self.provider.download_audio(
                     item, self.media_dir / item.source_id, force_refresh=force_refresh
                 )
+            self.repository.mark_job_downloaded(job_id)
             self.repository.update_job(job_id, JobStatus.TRANSCRIBING, 0.35, "Transcribing locally")
             segments = await asyncio.to_thread(self.stt.transcribe, audio, language)
             if not segments:

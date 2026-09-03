@@ -2,15 +2,40 @@ const select = (selector) => document.querySelector(selector);
 const results = select("#results");
 const jobs = select("#jobs");
 const queueStatus = select("#queue-status");
+const queueSummary = select("#queue-summary");
+const queueToggle = select("#queue-toggle");
+const queueContent = select("#queue-content");
+const queueCreatorFilter = select("#queue-creator-filter");
+const queueCollectionFilter = select("#queue-collection-filter");
+const queueYearFilter = select("#queue-year-filter");
+const queueMonthFilter = select("#queue-month-filter");
+const queueDayFilter = select("#queue-day-filter");
+const selectVisibleJobs = select("#select-visible-jobs");
+const selectedJobsCount = select("#selected-jobs-count");
+const deleteSelectedJobs = select("#delete-selected-jobs");
 const urlStatus = select("#url-status");
 const creatorStatus = select("#creator-status");
 const creatorBrowser = select("#creator-browser");
 const creatorContent = select("#creator-content");
 const settingsStatus = select("#settings-status");
+const settingsToggle = select("#settings-toggle");
+const settingsContent = select("#settings-content");
 const isStaticPreview = window.location.protocol === "file:";
 let searchResults = [];
 const expandedFileJobs = new Set();
+const expandedQueueJobs = new Set();
+const selectedQueueJobs = new Set();
 let creatorState = null;
+
+function updateQueueSelectionControls() {
+  const visible = [...jobs.querySelectorAll("[data-select-job]:not(:disabled)")];
+  const selectedVisible = visible.filter((input) => selectedQueueJobs.has(input.dataset.selectJob));
+  selectVisibleJobs.disabled = visible.length === 0;
+  selectVisibleJobs.checked = visible.length > 0 && selectedVisible.length === visible.length;
+  selectVisibleJobs.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visible.length;
+  selectedJobsCount.textContent = `${selectedQueueJobs.size} selected`;
+  deleteSelectedJobs.disabled = selectedQueueJobs.size === 0;
+}
 
 function escapeHtml(value) {
   return String(value ?? "").replace(
@@ -27,6 +52,60 @@ function escapeHtml(value) {
 
 function imageSource(url) {
   return url ? `/api/bilibili/image?url=${encodeURIComponent(url)}` : "";
+}
+
+function formatJobTime(value) {
+  if (!value) return "";
+  const timestamp = String(value).includes("T") ? String(value) : `${value.replace(" ", "T")}Z`;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function jobCreatedDateParts(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? { year: match[1], month: match[2], day: match[3] } : null;
+}
+
+function setDateFilterOptions(data) {
+  const selectedYear = queueYearFilter.value;
+  const selectedMonth = queueMonthFilter.value;
+  const selectedDay = queueDayFilter.value;
+  const dates = data.map((job) => jobCreatedDateParts(job.created_at)).filter(Boolean);
+  const years = [...new Set(dates.map((date) => date.year))].sort().reverse();
+  queueYearFilter.innerHTML = `
+    <option value="">All years</option>
+    ${years.map((year) => `<option value="${year}">${year}</option>`).join("")}
+  `;
+  if (years.includes(selectedYear)) queueYearFilter.value = selectedYear;
+
+  const months = queueYearFilter.value
+    ? [...new Set(dates.filter((date) => date.year === queueYearFilter.value)
+      .map((date) => date.month))].sort()
+    : [];
+  queueMonthFilter.innerHTML = `
+    <option value="">All months</option>
+    ${months.map((month) => `<option value="${month}">${month}</option>`).join("")}
+  `;
+  queueMonthFilter.disabled = !queueYearFilter.value;
+  if (months.includes(selectedMonth)) queueMonthFilter.value = selectedMonth;
+
+  const days = queueYearFilter.value && queueMonthFilter.value
+    ? [...new Set(dates.filter((date) => date.year === queueYearFilter.value
+      && date.month === queueMonthFilter.value).map((date) => date.day))].sort()
+    : [];
+  queueDayFilter.innerHTML = `
+    <option value="">All days</option>
+    ${days.map((day) => `<option value="${day}">${day}</option>`).join("")}
+  `;
+  queueDayFilter.disabled = !queueMonthFilter.value;
+  if (days.includes(selectedDay)) queueDayFilter.value = selectedDay;
 }
 
 async function requestJson(url, options = {}) {
@@ -532,9 +611,59 @@ async function submitVideo(video) {
 
 async function pollJobs() {
   try {
-    const data = await requestJson("/api/jobs");
-    jobs.innerHTML = data.length ? data.map((job) => {
+    const data = await requestJson("/api/jobs?limit=5000");
+    const existingJobIds = new Set(data.map((job) => job.id));
+    [...selectedQueueJobs].forEach((jobId) => {
+      if (!existingJobIds.has(jobId)) selectedQueueJobs.delete(jobId);
+    });
+    const selectedCreator = queueCreatorFilter.value;
+    const selectedCollection = queueCollectionFilter.value;
+    const creators = [...new Set(data.map((job) => job.source.author || "Unknown creator"))]
+      .sort((left, right) => left.localeCompare(right));
+    queueCreatorFilter.innerHTML = `
+      <option value="">All creators</option>
+      ${creators.map((creator) => `<option value="${escapeHtml(creator)}">${escapeHtml(creator)}</option>`).join("")}
+    `;
+    if (creators.includes(selectedCreator)) queueCreatorFilter.value = selectedCreator;
+    const collections = [...new Set(data.map((job) => job.source.collection_title).filter(Boolean))]
+      .sort((left, right) => left.localeCompare(right));
+    const hasUnassigned = data.some((job) => !job.source.collection_title);
+    queueCollectionFilter.innerHTML = `
+      <option value="">All collections</option>
+      ${collections.map((collection) => `<option value="${escapeHtml(collection)}">${escapeHtml(collection)}</option>`).join("")}
+      ${hasUnassigned ? '<option value="__none__">No collection data</option>' : ""}
+    `;
+    if (collections.includes(selectedCollection)
+        || (selectedCollection === "__none__" && hasUnassigned)) {
+      queueCollectionFilter.value = selectedCollection;
+    }
+    setDateFilterOptions(data);
+    const filteredData = data.filter((job) => {
+      const creatorMatches = !queueCreatorFilter.value
+        || (job.source.author || "Unknown creator") === queueCreatorFilter.value;
+      const collectionMatches = !queueCollectionFilter.value
+        || (queueCollectionFilter.value === "__none__"
+          ? !job.source.collection_title
+          : job.source.collection_title === queueCollectionFilter.value);
+      const created = jobCreatedDateParts(job.created_at);
+      const yearMatches = !queueYearFilter.value || created?.year === queueYearFilter.value;
+      const monthMatches = !queueMonthFilter.value || created?.month === queueMonthFilter.value;
+      const dayMatches = !queueDayFilter.value || created?.day === queueDayFilter.value;
+      return creatorMatches && collectionMatches && yearMatches && monthMatches && dayMatches;
+    });
+    const activeJobs = filteredData.filter(
+      (job) => !["complete", "failed"].includes(job.status),
+    ).length;
+    queueSummary.textContent = data.length
+      ? `${filteredData.length}${filteredData.length !== data.length ? ` of ${data.length}` : ""} jobs${activeJobs ? ` · ${activeJobs} active` : ""}`
+      : "No jobs";
+    jobs.innerHTML = filteredData.length ? filteredData.map((job) => {
       const outputEntries = Object.entries(job.outputs || {});
+      const expanded = expandedQueueJobs.has(job.id);
+      const author = job.source.author || "Unknown creator";
+      const collectionTitle = job.source.collection_title || "No collection data";
+      const timeValue = job.downloaded_at || job.created_at;
+      const timePrefix = job.downloaded_at ? "Downloaded" : "Added";
       const outputPaths = job.status === "complete" && outputEntries.length
         ? `<details class="job-files" data-file-list="${escapeHtml(job.id)}"
             ${expandedFileJobs.has(job.id) ? "open" : ""}>
@@ -567,27 +696,71 @@ async function pollJobs() {
       const canDelete = job.status === "complete" || job.status === "failed";
       return `
       <div class="job">
-        <div class="job-head">
-          <span>${escapeHtml(job.source.title)}</span>
-          <strong>${escapeHtml(job.status)}</strong>
+        <div class="job-header">
+          <label class="job-selector" title="Select this history record">
+            <input type="checkbox" data-select-job="${escapeHtml(job.id)}"
+              ${selectedQueueJobs.has(job.id) ? "checked" : ""} ${canDelete ? "" : "disabled"}>
+            <span class="sr-only">Select ${escapeHtml(job.source.title)}</span>
+          </label>
+          <button type="button" class="job-summary" data-toggle-job="${escapeHtml(job.id)}"
+            aria-expanded="${expanded}">
+            <span class="job-summary-main">
+              <strong>${escapeHtml(job.source.title)}</strong>
+              <span class="job-tags">
+                <span class="creator-tag">${escapeHtml(author)}</span>
+                <span class="collection-tag">${escapeHtml(collectionTitle)}</span>
+                <time datetime="${escapeHtml(timeValue)}">${timePrefix} ${escapeHtml(formatJobTime(timeValue))}</time>
+              </span>
+            </span>
+            <span class="job-summary-side">
+              <span class="job-status ${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
+              <span class="job-disclosure" aria-hidden="true">${expanded ? "−" : "+"}</span>
+            </span>
+          </button>
+          <button type="button" class="quick-delete" data-quick-delete-job="${escapeHtml(job.id)}"
+            title="Delete history record" aria-label="Delete ${escapeHtml(job.source.title)}"
+            ${canDelete ? "" : "disabled"}>×</button>
         </div>
         <div class="bar"><i style="width: ${job.progress * 100}%"></i></div>
-        <small>${escapeHtml(job.message)}</small>
-        ${outputPaths}
-        <div class="job-actions">
-          <button type="button" class="secondary" data-delete-job="${escapeHtml(job.id)}"
-            ${canDelete ? "" : "disabled"}>Delete Record</button>
-          <button type="button" class="danger" data-delete-files="${escapeHtml(job.id)}"
-            ${canDelete ? "" : "disabled"}>Delete Record &amp; Files</button>
+        <div class="job-body" ${expanded ? "" : "hidden"}>
+          <small>${escapeHtml(job.message)}</small>
+          ${outputPaths}
+          <div class="job-actions">
+            <button type="button" class="secondary" data-delete-job="${escapeHtml(job.id)}"
+              ${canDelete ? "" : "disabled"}>Delete Record</button>
+            <button type="button" class="danger" data-delete-files="${escapeHtml(job.id)}"
+              ${canDelete ? "" : "disabled"}>Delete Record &amp; Files</button>
+          </div>
         </div>
       </div>
     `;
-    }).join("") : '<div class="empty">No jobs yet</div>';
+    }).join("") : '<div class="empty">No jobs for this creator</div>';
+    jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const jobId = button.dataset.toggleJob;
+        if (expandedQueueJobs.has(jobId)) {
+          expandedQueueJobs.delete(jobId);
+        } else {
+          expandedQueueJobs.add(jobId);
+        }
+        pollJobs();
+      });
+    });
     jobs.querySelectorAll("[data-delete-job]").forEach((button) => {
       button.addEventListener("click", () => deleteJob(button.dataset.deleteJob, false));
     });
     jobs.querySelectorAll("[data-delete-files]").forEach((button) => {
       button.addEventListener("click", () => deleteJob(button.dataset.deleteFiles, true));
+    });
+    jobs.querySelectorAll("[data-quick-delete-job]").forEach((button) => {
+      button.addEventListener("click", () => deleteJob(button.dataset.quickDeleteJob, false));
+    });
+    jobs.querySelectorAll("[data-select-job]").forEach((input) => {
+      input.addEventListener("change", () => {
+        if (input.checked) selectedQueueJobs.add(input.dataset.selectJob);
+        else selectedQueueJobs.delete(input.dataset.selectJob);
+        updateQueueSelectionControls();
+      });
     });
     jobs.querySelectorAll("[data-output-action]").forEach((button) => {
       button.addEventListener("click", () => openJobOutput(
@@ -628,7 +801,9 @@ async function pollJobs() {
       });
       if (fileList.matches(":hover")) expand();
     });
+    updateQueueSelectionControls();
   } catch (error) {
+    queueSummary.textContent = "Queue unavailable";
     jobs.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
 }
@@ -662,9 +837,31 @@ async function deleteJob(jobId, deleteFiles) {
     queueStatus.textContent = deleteFiles
       ? `Record deleted; ${result.removed_files.length} local file(s) removed.`
       : "Queue record deleted; local files were kept.";
+    selectedQueueJobs.delete(jobId);
     await pollJobs();
   } catch (error) {
     queueStatus.textContent = error.message;
+  }
+}
+
+async function deleteSelectedJobRecords() {
+  const jobIds = [...selectedQueueJobs];
+  if (!jobIds.length) return;
+  if (!window.confirm(`Delete ${jobIds.length} selected history record(s)? Local files will be kept.`)) return;
+  queueStatus.textContent = `Deleting ${jobIds.length} record(s)…`;
+  deleteSelectedJobs.disabled = true;
+  try {
+    const result = await requestJson("/api/jobs/batch-delete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ job_ids: jobIds }),
+    });
+    selectedQueueJobs.clear();
+    queueStatus.textContent = `${result.count} history record(s) deleted; local files were kept.`;
+    await pollJobs();
+  } catch (error) {
+    queueStatus.textContent = error.message;
+    updateQueueSelectionControls();
   }
 }
 
@@ -777,6 +974,51 @@ select("#mlx-stop").addEventListener("click", async () => {
 
 select("#charging-only").addEventListener("change", renderResults);
 select("#tag-filter").addEventListener("input", renderResults);
+queueToggle.addEventListener("click", () => {
+  const expanded = queueToggle.getAttribute("aria-expanded") === "true";
+  queueToggle.setAttribute("aria-expanded", String(!expanded));
+  queueContent.hidden = expanded;
+  select(".queue-toggle-label").textContent = expanded ? "Expand" : "Collapse";
+});
+queueCreatorFilter.addEventListener("change", pollJobs);
+queueCollectionFilter.addEventListener("change", pollJobs);
+queueYearFilter.addEventListener("change", () => {
+  queueMonthFilter.value = "";
+  queueDayFilter.value = "";
+  pollJobs();
+});
+queueMonthFilter.addEventListener("change", () => {
+  queueDayFilter.value = "";
+  pollJobs();
+});
+queueDayFilter.addEventListener("change", pollJobs);
+selectVisibleJobs.addEventListener("change", () => {
+  jobs.querySelectorAll("[data-select-job]:not(:disabled)").forEach((input) => {
+    input.checked = selectVisibleJobs.checked;
+    if (selectVisibleJobs.checked) selectedQueueJobs.add(input.dataset.selectJob);
+    else selectedQueueJobs.delete(input.dataset.selectJob);
+  });
+  updateQueueSelectionControls();
+});
+deleteSelectedJobs.addEventListener("click", deleteSelectedJobRecords);
+select("#expand-all-jobs").addEventListener("click", () => {
+  jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
+    expandedQueueJobs.add(button.dataset.toggleJob);
+  });
+  pollJobs();
+});
+select("#collapse-all-jobs").addEventListener("click", () => {
+  jobs.querySelectorAll("[data-toggle-job]").forEach((button) => {
+    expandedQueueJobs.delete(button.dataset.toggleJob);
+  });
+  pollJobs();
+});
+settingsToggle.addEventListener("click", () => {
+  const expanded = settingsToggle.getAttribute("aria-expanded") === "true";
+  settingsToggle.setAttribute("aria-expanded", String(!expanded));
+  settingsContent.hidden = expanded;
+  select(".settings-toggle-label").textContent = expanded ? "Expand" : "Collapse";
+});
 select("#login").addEventListener("click", async () => {
   try {
     const data = await requestJson("/api/login", { method: "POST" });
@@ -792,6 +1034,7 @@ if (isStaticPreview) {
     button.disabled = true;
   });
   creatorStatus.textContent = "Start the local app to browse creators and submit jobs.";
+  queueSummary.textContent = "Preview only";
   jobs.innerHTML = '<div class="empty">Start the local app to view the processing queue</div>';
 } else {
   loadSettings();

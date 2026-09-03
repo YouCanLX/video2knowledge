@@ -34,7 +34,8 @@ class LibraryRepository:
               progress REAL NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
               outputs_json TEXT NOT NULL DEFAULT '{}',
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              downloaded_at TEXT
             );
             CREATE TABLE IF NOT EXISTS documents (
               source_id TEXT PRIMARY KEY, title TEXT NOT NULL, author TEXT NOT NULL,
@@ -43,6 +44,11 @@ class LibraryRepository:
             );
             """
         )
+        columns = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        if "downloaded_at" not in columns:
+            self.connection.execute("ALTER TABLE jobs ADD COLUMN downloaded_at TEXT")
         self.connection.commit()
 
     def create_job(self, item: VideoItem) -> str:
@@ -74,6 +80,16 @@ class LibraryRepository:
                 json.dumps(outputs or {}, ensure_ascii=False),
                 job_id,
             ),
+        )
+        self.connection.commit()
+
+    def mark_job_downloaded(self, job_id: str) -> None:
+        self.connection.execute(
+            """UPDATE jobs
+               SET downloaded_at=COALESCE(downloaded_at, CURRENT_TIMESTAMP),
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE id=?""",
+            (job_id,),
         )
         self.connection.commit()
 

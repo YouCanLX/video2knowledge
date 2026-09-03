@@ -63,6 +63,10 @@ class CreatorBatchRequest(BaseModel):
     force_refresh: bool = False
 
 
+class DeleteJobsRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1, max_length=500)
+
+
 class RuntimeSettingsRequest(BaseModel):
     media_dir: str = Field(min_length=1)
     library_dir: str = Field(min_length=1)
@@ -363,8 +367,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/api/jobs")
-    async def list_jobs():
-        return repository.list_jobs()
+    async def list_jobs(limit: int = Query(default=50, ge=1, le=5000)):
+        return repository.list_jobs(limit=limit)
 
     @app.get("/api/jobs/{job_id}")
     async def get_job(job_id: str):
@@ -425,6 +429,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             repository.delete_document(str(job["source"]["source_id"]))
         repository.delete_job(job_id)
         return {"deleted": job_id, "removed_files": removed, "skipped_files": skipped}
+
+    @app.post("/api/jobs/batch-delete")
+    async def batch_delete_jobs(body: DeleteJobsRequest):
+        job_ids = list(dict.fromkeys(body.job_ids))
+        jobs = {job_id: repository.get_job(job_id) for job_id in job_ids}
+        missing = [job_id for job_id, job in jobs.items() if job is None]
+        active = [
+            job_id
+            for job_id, job in jobs.items()
+            if job is not None and job["status"] not in TERMINAL_JOB_STATUSES
+        ]
+        if missing:
+            raise HTTPException(404, f"Job not found: {missing[0]}")
+        if active:
+            raise HTTPException(409, "Only completed or failed jobs can be deleted")
+        for job_id in job_ids:
+            repository.delete_job(job_id)
+        return {"deleted": job_ids, "count": len(job_ids)}
 
     @app.get("/api/library")
     async def library(q: str = "", tag: str = "", charging: bool | None = None):
