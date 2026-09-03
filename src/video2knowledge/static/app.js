@@ -45,6 +45,7 @@ const expandedQueueDates = new Set();
 const selectedQueueJobs = new Set();
 const trackedRequests = new Map();
 const downloadHistoryGroups = new Map();
+const expandedDownloadHistoryCreators = new Set();
 let creatorState = null;
 let lastUserInteraction = Number(localStorage.getItem(REQUEST_LAST_INTERACTION_KEY)) || Date.now();
 let draggingRequestId = null;
@@ -503,6 +504,58 @@ function historyGroupKey(entry) {
   return `video:${source.source_id}`;
 }
 
+function historyCreatorKey(entry) {
+  const source = entry.source;
+  return String(source.author_id || source.author || "unknown");
+}
+
+function historyCount(count, label) {
+  return `${count} ${label}${count === 1 ? "" : "s"}`;
+}
+
+function renderDownloadHistoryCard(group) {
+  const statusCounts = { complete: 0, failed: 0, queued: 0, running: 0 };
+  group.entries.forEach((entry) => {
+    if (["complete", "failed", "queued"].includes(entry.status)) {
+      statusCounts[entry.status] += 1;
+    } else {
+      statusCounts.running += 1;
+    }
+  });
+  const active = statusCounts.queued + statusCounts.running;
+  const latest = group.entries[0];
+  const sourceUrl = !group.isCollection ? safeExternalUrl(latest.source.url) : "";
+  const statusText = [
+    statusCounts.complete ? `${statusCounts.complete} complete` : "",
+    statusCounts.failed ? `${statusCounts.failed} failed` : "",
+    statusCounts.running ? `${statusCounts.running} running` : "",
+    statusCounts.queued ? `${statusCounts.queued} queued` : "",
+  ].filter(Boolean).join(" · ");
+  return `
+    <article class="download-history-card">
+      ${group.coverUrl
+        ? `<img src="${escapeHtml(imageSource(group.coverUrl))}" alt="" loading="lazy">`
+        : '<div class="download-history-placeholder" aria-hidden="true">V</div>'}
+      <div class="download-history-info">
+        <span class="history-kind">${group.isCollection ? "Collection" : "Video"}</span>
+        <strong title="${escapeHtml(group.title)}">${escapeHtml(group.title)}</strong>
+        <small>${group.entries.length} video${group.entries.length === 1 ? "" : "s"}</small>
+        <small>${escapeHtml(statusText || "Pending")} · ${escapeHtml(formatJobTime(latest.created_at))}</small>
+        ${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Open video ↗</a>` : ""}
+      </div>
+      <div class="download-history-actions">
+        <button type="button" class="secondary" data-delete-history="${escapeHtml(group.key)}">
+          Delete history
+        </button>
+        <button type="button" class="danger" data-delete-history-files="${escapeHtml(group.key)}"
+          ${active ? "disabled title=\"Wait for active downloads to finish\"" : ""}>
+          Delete history &amp; files
+        </button>
+      </div>
+    </article>
+  `;
+}
+
 function renderDownloadHistory(entries) {
   downloadHistoryGroups.clear();
   entries.forEach((entry) => {
@@ -510,6 +563,7 @@ function renderDownloadHistory(entries) {
     if (!downloadHistoryGroups.has(key)) {
       downloadHistoryGroups.set(key, {
         key,
+        creatorKey: historyCreatorKey(entry),
         isCollection: key.startsWith("collection:"),
         title: entry.source.collection_title || entry.source.title,
         author: entry.source.author || "Unknown creator",
@@ -520,53 +574,50 @@ function renderDownloadHistory(entries) {
     downloadHistoryGroups.get(key).entries.push(entry);
   });
   const groups = [...downloadHistoryGroups.values()];
+  const creators = new Map();
+  groups.forEach((group) => {
+    if (!creators.has(group.creatorKey)) {
+      creators.set(group.creatorKey, {
+        key: group.creatorKey,
+        name: group.author,
+        groups: [],
+      });
+    }
+    creators.get(group.creatorKey).groups.push(group);
+  });
   const collections = groups.filter((group) => group.isCollection).length;
   const singles = groups.length - collections;
   downloadHistorySummary.textContent = entries.length
-    ? `${entries.length} videos · ${collections} collections · ${singles} individual`
+    ? `${historyCount(creators.size, "creator")} · ${historyCount(entries.length, "video")} · ${historyCount(collections, "collection")} · ${singles} individual`
     : "No local download history yet";
-  downloadHistoryList.innerHTML = groups.length ? groups.map((group) => {
-    const statusCounts = { complete: 0, failed: 0, queued: 0, running: 0 };
-    group.entries.forEach((entry) => {
-      if (["complete", "failed", "queued"].includes(entry.status)) {
-        statusCounts[entry.status] += 1;
-      } else {
-        statusCounts.running += 1;
-      }
-    });
-    const active = statusCounts.queued + statusCounts.running;
-    const latest = group.entries[0];
-    const sourceUrl = !group.isCollection ? safeExternalUrl(latest.source.url) : "";
-    const statusText = [
-      statusCounts.complete ? `${statusCounts.complete} complete` : "",
-      statusCounts.failed ? `${statusCounts.failed} failed` : "",
-      statusCounts.running ? `${statusCounts.running} running` : "",
-      statusCounts.queued ? `${statusCounts.queued} queued` : "",
-    ].filter(Boolean).join(" · ");
+  downloadHistoryList.innerHTML = creators.size ? [...creators.values()].map((creator) => {
+    const creatorCollections = creator.groups.filter((group) => group.isCollection).length;
+    const creatorSingles = creator.groups.length - creatorCollections;
+    const creatorVideos = creator.groups.reduce((total, group) => total + group.entries.length, 0);
     return `
-      <article class="download-history-card">
-        ${group.coverUrl
-          ? `<img src="${escapeHtml(imageSource(group.coverUrl))}" alt="" loading="lazy">`
-          : '<div class="download-history-placeholder" aria-hidden="true">V</div>'}
-        <div class="download-history-info">
-          <span class="history-kind">${group.isCollection ? "Collection" : "Video"}</span>
-          <strong title="${escapeHtml(group.title)}">${escapeHtml(group.title)}</strong>
-          <small>${escapeHtml(group.author)} · ${group.entries.length} video${group.entries.length === 1 ? "" : "s"}</small>
-          <small>${escapeHtml(statusText || "Pending")} · ${escapeHtml(formatJobTime(latest.created_at))}</small>
-          ${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Open video ↗</a>` : ""}
+      <details class="download-history-creator" data-history-creator="${escapeHtml(creator.key)}"
+        ${expandedDownloadHistoryCreators.has(creator.key) ? "open" : ""}>
+        <summary>
+          <span class="download-history-creator-placeholder" aria-hidden="true">C</span>
+          <span class="download-history-creator-info">
+            <span class="history-kind">Creator</span>
+            <strong>${escapeHtml(creator.name)}</strong>
+            <small>${historyCount(creatorVideos, "video")} · ${historyCount(creatorCollections, "collection")} · ${creatorSingles} individual</small>
+          </span>
+          <span class="download-history-creator-toggle" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="download-history-creator-items">
+          ${creator.groups.map(renderDownloadHistoryCard).join("")}
         </div>
-        <div class="download-history-actions">
-          <button type="button" class="secondary" data-delete-history="${escapeHtml(group.key)}">
-            Delete history
-          </button>
-          <button type="button" class="danger" data-delete-history-files="${escapeHtml(group.key)}"
-            ${active ? "disabled title=\"Wait for active downloads to finish\"" : ""}>
-            Delete history &amp; files
-          </button>
-        </div>
-      </article>
+      </details>
     `;
   }).join("") : '<div class="empty">No local download history yet</div>';
+  downloadHistoryList.querySelectorAll("[data-history-creator]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      if (details.open) expandedDownloadHistoryCreators.add(details.dataset.historyCreator);
+      else expandedDownloadHistoryCreators.delete(details.dataset.historyCreator);
+    });
+  });
   downloadHistoryList.querySelectorAll("[data-delete-history]").forEach((button) => {
     button.addEventListener("click", () => deleteDownloadHistoryGroup(
       button.dataset.deleteHistory, false,

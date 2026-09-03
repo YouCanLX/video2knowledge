@@ -132,6 +132,9 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "setInterval(pollDownloadHistory" not in script.text
     assert "setInterval(pollMlxStatus" not in script.text
     assert 'requestJson("/api/download-history?limit=5000")' in script.text
+    assert "historyCreatorKey" in script.text
+    assert 'class="download-history-creator"' in script.text
+    assert "expandedDownloadHistoryCreators" in script.text
     assert 'addEventListener("mouseenter", expand)' in script.text
     assert 'fileList.matches(":hover")' in script.text
     assert 'data-batch-scope="all-collections"' in script.text
