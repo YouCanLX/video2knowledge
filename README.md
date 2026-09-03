@@ -18,6 +18,8 @@ speech and an Apple Music-compatible M4A file.
   charging-content downloads; falls back to `yt-dlp` when `bili-dl` is not configured.
 - Reuses complete media, transcription, summary, and export results by default and supports
   an explicit force-refresh option.
+- Computes SHA-256 after download and stores byte-identical media once, with source-to-asset
+  references protecting shared files until their final reference is removed.
 - Transcribes locally through an MLX Audio OpenAI-compatible server.
 - Generates core summaries, further insights, suggestions, and follow-up questions.
 - Stores readable Markdown plus synchronized LRC and machine-readable JSON timelines.

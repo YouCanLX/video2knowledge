@@ -25,6 +25,7 @@ from .config import Settings
 from .mlx_service import MlxAudioServiceManager
 from .models import JobStatus, VideoItem
 from .pipeline import SerialJobRunner, find_cached_media_files
+from .repository import LibraryRepository
 from .services import build_services
 from .urls import extract_bilibili_bvid, extract_bilibili_creator_id
 
@@ -121,18 +122,41 @@ def _job_file_candidates(job: dict, media_dir: Path) -> list[Path]:
     return sorted(paths, key=str)
 
 
-def _delete_job_files(job: dict, media_dir: Path) -> tuple[list[str], list[str]]:
+def _delete_job_files(
+    job: dict, media_dir: Path, repository: LibraryRepository
+) -> tuple[list[str], list[str]]:
     source_id = str(job["source"]["source_id"])
+    source_asset = repository.get_media_asset_for_source(source_id)
+    repository.delete_media_reference(source_id)
     removed: list[str] = []
     skipped: list[str] = []
-    for path in _job_file_candidates(job, media_dir):
-        if source_id.casefold() not in str(path).casefold():
+    candidates = set(_job_file_candidates(job, media_dir))
+    if source_asset:
+        candidates.add(Path(source_asset["path"]).expanduser())
+    for path in sorted(candidates, key=str):
+        resolved_path = str(path.expanduser().resolve())
+        asset = repository.get_media_asset_by_path(resolved_path)
+        if asset and repository.media_reference_count(asset["sha256"]) > 0:
+            skipped.append(str(path))
+            continue
+        is_unreferenced_source_asset = source_asset is not None and resolved_path == str(
+            Path(source_asset["path"]).expanduser().resolve()
+        )
+        if (
+            not asset
+            and not is_unreferenced_source_asset
+            and source_id.casefold() not in str(path).casefold()
+        ):
             skipped.append(str(path))
             continue
         if not path.exists() and not path.is_symlink():
+            if asset:
+                repository.delete_media_asset_if_unreferenced(asset["sha256"])
             continue
         path.unlink()
         removed.append(str(path))
+        if asset:
+            repository.delete_media_asset_if_unreferenced(asset["sha256"])
         with suppress(OSError):
             path.parent.rmdir()
     return removed, skipped
@@ -591,7 +615,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         skipped: list[str] = []
         if delete_files:
             try:
-                removed, skipped = _delete_job_files(job, settings.media_dir)
+                removed, skipped = _delete_job_files(job, settings.media_dir, repository)
             except OSError as exc:
                 raise HTTPException(500, f"Could not delete a local file: {exc}") from exc
             repository.delete_document(str(job["source"]["source_id"]))
@@ -644,7 +668,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body.delete_files:
             try:
                 for source_id, entry in entries.items():
-                    entry_removed, entry_skipped = _delete_job_files(entry, settings.media_dir)
+                    entry_removed, entry_skipped = _delete_job_files(
+                        entry, settings.media_dir, repository
+                    )
                     removed.extend(entry_removed)
                     skipped.extend(entry_skipped)
                     repository.delete_document(source_id)

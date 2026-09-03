@@ -54,6 +54,22 @@ class LibraryRepository:
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               downloaded_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS media_assets (
+              sha256 TEXT PRIMARY KEY, path TEXT NOT NULL,
+              size_bytes INTEGER NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS media_references (
+              source_id TEXT PRIMARY KEY, sha256 TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (sha256) REFERENCES media_assets(sha256)
+            );
+            CREATE INDEX IF NOT EXISTS media_references_sha256_idx
+              ON media_references(sha256);
+            CREATE INDEX IF NOT EXISTS media_assets_path_idx
+              ON media_assets(path);
             CREATE TABLE IF NOT EXISTS app_metadata (
               key TEXT PRIMARY KEY, value TEXT NOT NULL
             );
@@ -220,6 +236,77 @@ class LibraryRepository:
             (job_id,),
         )
         self.connection.commit()
+
+    def get_media_asset(self, sha256: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT * FROM media_assets WHERE sha256=?", (sha256,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_media_asset_for_source(self, source_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """SELECT asset.* FROM media_assets AS asset
+               JOIN media_references AS reference ON reference.sha256=asset.sha256
+               WHERE reference.source_id=?""",
+            (source_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_media_asset_by_path(self, path: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT * FROM media_assets WHERE path=? ORDER BY updated_at DESC LIMIT 1", (path,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def save_media_asset(
+        self, source_id: str, sha256: str, path: str, size_bytes: int
+    ) -> dict[str, Any]:
+        self.connection.execute(
+            """INSERT INTO media_assets(sha256, path, size_bytes)
+               VALUES (?, ?, ?)
+               ON CONFLICT(sha256) DO UPDATE SET
+                 path=excluded.path, size_bytes=excluded.size_bytes,
+                 updated_at=CURRENT_TIMESTAMP""",
+            (sha256, path, size_bytes),
+        )
+        self.connection.execute(
+            """INSERT INTO media_references(source_id, sha256)
+               VALUES (?, ?)
+               ON CONFLICT(source_id) DO UPDATE SET
+                 sha256=excluded.sha256, updated_at=CURRENT_TIMESTAMP""",
+            (source_id, sha256),
+        )
+        self.connection.commit()
+        return self.get_media_asset(sha256) or {
+            "sha256": sha256,
+            "path": path,
+            "size_bytes": size_bytes,
+        }
+
+    def delete_media_reference(self, source_id: str) -> bool:
+        cursor = self.connection.execute(
+            "DELETE FROM media_references WHERE source_id=?", (source_id,)
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
+
+    def media_reference_count(self, sha256: str) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) AS count FROM media_references WHERE sha256=?", (sha256,)
+        ).fetchone()
+        return int(row["count"])
+
+    def delete_media_asset_if_unreferenced(self, sha256: str) -> bool:
+        cursor = self.connection.execute(
+            """DELETE FROM media_assets
+               WHERE sha256=?
+                 AND NOT EXISTS (
+                   SELECT 1 FROM media_references WHERE media_references.sha256=media_assets.sha256
+                 )""",
+            (sha256,),
+        )
+        self.connection.commit()
+        return cursor.rowcount > 0
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         row = self.connection.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()

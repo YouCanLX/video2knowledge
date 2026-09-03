@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import shutil
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -51,6 +54,17 @@ def find_cached_media(media_dir: Path, source_id: str) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
 
 
+def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> tuple[str, int]:
+    """Hash a media file with bounded memory and return its digest and byte size."""
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(chunk_size):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
 def reusable_outputs(job: dict, synthesize: bool = False) -> dict[str, str] | None:
     """Return prior outputs only when every artifact needed by this request still exists."""
     outputs = job.get("outputs") or {}
@@ -82,6 +96,40 @@ class Pipeline:
         self.provider, self.stt, self.enricher, self.tts = provider, stt, enricher, tts
         self.repository, self.media_dir, self.library_dir = repository, media_dir, library_dir
 
+    async def _deduplicate_media(self, source_id: str, path: Path) -> tuple[Path, bool]:
+        sha256, size_bytes = await asyncio.to_thread(sha256_file, path)
+        if size_bytes <= 0:
+            raise RuntimeError("The downloaded media file is empty")
+        existing = self.repository.get_media_asset(sha256)
+        if existing:
+            existing_path = Path(existing["path"]).expanduser()
+            if existing_path.is_file() and existing_path.stat().st_size == size_bytes:
+                if path.absolute() != existing_path.absolute():
+                    path.unlink()
+                    with suppress(OSError):
+                        path.parent.rmdir()
+                self.repository.save_media_asset(
+                    source_id, sha256, str(existing_path.resolve()), size_bytes
+                )
+                return existing_path, True
+
+        suffix = path.suffix.casefold() or ".media"
+        asset_dir = self.media_dir / ".assets" / sha256[:2]
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        asset_path = asset_dir / f"{sha256}{suffix}"
+        if path.absolute() != asset_path.absolute():
+            target_is_valid = asset_path.is_file() and asset_path.stat().st_size == size_bytes
+            if target_is_valid:
+                path.unlink()
+            else:
+                if asset_path.exists() or asset_path.is_symlink():
+                    asset_path.unlink()
+                shutil.move(str(path), str(asset_path))
+            with suppress(OSError):
+                path.parent.rmdir()
+        self.repository.save_media_asset(source_id, sha256, str(asset_path.resolve()), size_bytes)
+        return asset_path, False
+
     async def run(
         self,
         job_id: str,
@@ -96,6 +144,15 @@ class Pipeline:
                 previous = self.repository.find_completed_job(item.source_id, language, synthesize)
                 cached_outputs = reusable_outputs(previous, synthesize) if previous else None
                 if cached_outputs:
+                    media_path = str(Path(cached_outputs["source_media"]).expanduser().resolve())
+                    asset = self.repository.get_media_asset_by_path(media_path)
+                    if asset:
+                        self.repository.save_media_asset(
+                            item.source_id,
+                            asset["sha256"],
+                            media_path,
+                            asset["size_bytes"],
+                        )
                     self.repository.mark_job_downloaded(job_id)
                     self.repository.save_document(item, cached_outputs, cached_outputs.get("audio"))
                     self.repository.update_job(
@@ -106,7 +163,17 @@ class Pipeline:
                         cached_outputs,
                     )
                     return cached_outputs
-            audio = None if force_refresh else find_cached_media(self.media_dir, item.source_id)
+            registered = (
+                None
+                if force_refresh
+                else self.repository.get_media_asset_for_source(item.source_id)
+            )
+            audio = Path(registered["path"]) if registered else None
+            if audio and (not audio.is_file() or audio.stat().st_size != registered["size_bytes"]):
+                audio = None
+                registered = None
+            if audio is None and not force_refresh:
+                audio = find_cached_media(self.media_dir, item.source_id)
             if audio:
                 await self._set_stage(
                     job_id,
@@ -121,6 +188,23 @@ class Pipeline:
                 audio = await self.provider.download_audio(
                     item, self.media_dir / item.source_id, force_refresh=force_refresh
                 )
+            if not registered or force_refresh:
+                await self._set_stage(
+                    job_id,
+                    JobStatus.DOWNLOADING,
+                    0.28,
+                    "Checking media SHA-256",
+                    checkpoint,
+                )
+                audio, duplicate = await self._deduplicate_media(item.source_id, audio)
+                if duplicate:
+                    await self._set_stage(
+                        job_id,
+                        JobStatus.DOWNLOADING,
+                        0.3,
+                        "Reusing identical media asset",
+                        checkpoint,
+                    )
             self.repository.mark_job_downloaded(job_id)
             await self._set_stage(
                 job_id,

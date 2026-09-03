@@ -117,10 +117,10 @@ def test_runner_pauses_active_job_at_safe_stage_boundary_and_resumes(tmp_path):
 
         provider.release.set()
         await wait_for_job_status(repo, job_id, "paused")
-        assert repo.get_job(job_id)["progress"] == 0.35
+        assert repo.get_job(job_id)["progress"] == 0.28
 
         resumed = runner.resume(job_id)
-        assert resumed["status"] == "transcribing"
+        assert resumed["status"] == "downloading"
         await runner.queue.join()
         assert repo.get_job(job_id)["status"] == "complete"
         runner._worker.cancel()
@@ -267,7 +267,7 @@ def test_pipeline_reuses_cached_media_unless_forced(tmp_path):
         assert repo.get_job(second_job)["message"] == (
             "Media, transcription, summary, and exports already complete"
         )
-        assert repo.get_job(second_job)["outputs"]["source_media"].endswith("audio.wav")
+        assert Path(repo.get_job(second_job)["outputs"]["source_media"]).is_file()
 
         refresh_job = repo.create_job(item)
         await pipeline.run(refresh_job, item, force_refresh=True)
@@ -336,6 +336,40 @@ def test_pipeline_reuses_all_completed_outputs_unless_missing_or_forced(tmp_path
         assert provider.download_count == 2
         assert stt.count == 3
         assert llm.count == 3
+
+    asyncio.run(scenario())
+
+
+def test_pipeline_deduplicates_identical_media_across_source_ids(tmp_path):
+    async def scenario():
+        provider = FakeProvider()
+        repo = LibraryRepository(tmp_path / "db.sqlite")
+        pipeline = Pipeline(
+            provider,
+            FakeSTT(),
+            FakeLLM(),
+            FakeTTS(),
+            repo,
+            tmp_path / "media",
+            tmp_path / "library",
+        )
+        first = VideoItem("bilibili", "BV1FIRST", "First", "https://example.test/first")
+        second = VideoItem("bilibili", "BV1SECOND", "Second", "https://example.test/second")
+
+        first_job = repo.create_job(first)
+        first_outputs = await pipeline.run(first_job, first)
+        second_job = repo.create_job(second)
+        second_outputs = await pipeline.run(second_job, second)
+
+        first_media = Path(first_outputs["source_media"])
+        assert second_outputs["source_media"] == str(first_media)
+        assert first_media.is_file()
+        assert ".assets" in first_media.parts
+        assert not (tmp_path / "media" / "BV1SECOND" / "audio.wav").exists()
+        asset = repo.get_media_asset_for_source(first.source_id)
+        assert asset == repo.get_media_asset_for_source(second.source_id)
+        assert repo.media_reference_count(asset["sha256"]) == 2
+        assert repo.connection.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
 
     asyncio.run(scenario())
 

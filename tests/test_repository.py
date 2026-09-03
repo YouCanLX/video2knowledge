@@ -81,3 +81,28 @@ def test_existing_jobs_database_gains_restart_parameter_columns(tmp_path):
     columns = {row["name"] for row in repo.connection.execute("PRAGMA table_info(jobs)").fetchall()}
 
     assert {"language", "synthesize", "force_refresh"}.issubset(columns)
+    tables = {
+        row["name"]
+        for row in repo.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    assert {"media_assets", "media_references"}.issubset(tables)
+
+
+def test_media_assets_track_content_and_source_references(tmp_path):
+    repo = LibraryRepository(tmp_path / "data.db")
+    path = tmp_path / "asset.m4a"
+    path.write_bytes(b"same media")
+    digest = "a" * 64
+
+    repo.save_media_asset("BV1A", digest, str(path.resolve()), path.stat().st_size)
+    repo.save_media_asset("BV1B", digest, str(path.resolve()), path.stat().st_size)
+
+    assert repo.get_media_asset_for_source("BV1A")["sha256"] == digest
+    assert repo.get_media_asset_by_path(str(path.resolve()))["sha256"] == digest
+    assert repo.media_reference_count(digest) == 2
+    assert repo.delete_media_reference("BV1A") is True
+    assert repo.delete_media_asset_if_unreferenced(digest) is False
+    assert repo.delete_media_reference("BV1B") is True
+    assert repo.delete_media_asset_if_unreferenced(digest) is True
