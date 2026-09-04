@@ -34,6 +34,7 @@ SQLite repository + Markdown/LRC/JSON exporters
 | `repository.py` | SQLite job and knowledge-document index |
 | `exporters.py` | Markdown, LRC, JSON, and Markdown parsing |
 | `apple_music.py` | FFmpeg-based AAC/M4A packaging |
+| `light_player.py` | Lossless M4A lyric-metadata updates from same-name LRC sidecars |
 | `naming.py` | Cross-platform library directory and file naming |
 | `storage.py` | Migration of legacy split media and generated artifacts into bundles |
 | `adapters/bilibili.py` | Public Bilibili metadata/search and `yt-dlp` download |

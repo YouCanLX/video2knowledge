@@ -40,6 +40,8 @@ speech and an Apple Music-compatible M4A file.
 - ✅ Keeps the editable Markdown note at the video-bundle root and places source audio,
   synchronized LRC, and machine-readable JSON timelines together under `assets/`.
 - ✅ Converts Markdown to speech and optionally packages it as AAC/M4A for Apple Music.
+- ✅ Updates bundle M4A files for Light Player by embedding the complete timestamped LRC text
+  as lyrics without re-encoding audio, while retaining the LRC and JSON sidecars.
 
 ### Knowledge and task management
 
@@ -205,6 +207,24 @@ v2k speak notes.md --title "Knowledge Audio" --author "Author"
 Apple Music imports the generated M4A with plain embedded lyrics. Precise synchronization
 remains in the same-name LRC and JSON files because Apple Music has no stable public format
 for importing synchronized lyrics.
+
+Prepare or update every video bundle for Light Player:
+
+```bash
+v2k export-light-player
+```
+
+The command finds same-name `.m4a` and `.lrc` files under each `assets/` directory, writes
+the full timestamped LRC text to the M4A `©lyr` metadata atom, and reports updated,
+unchanged, missing, invalid, and failed counts. It edits a temporary M4A copy and atomically
+replaces the original only after verification. The audio track is never decoded or
+re-encoded; the `.lrc`, timeline JSON, and metadata JSON files remain separate and unchanged.
+Use `--library-dir PATH` to update a non-default library.
+
+Light Player may cache metadata from a previous import. Delete already imported copies from
+its library and import the updated M4A files again; importing the same paths without removal
+may continue showing the old cached state. Keep Light Player's automatic embedded-lyrics
+parsing enabled.
 
 ## Data layout
 

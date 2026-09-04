@@ -10,6 +10,7 @@ import typer
 from .apple_music import export_apple_music
 from .config import Settings
 from .exporters import parse_markdown_text, write_bundle
+from .light_player import export_light_player
 from .models import KnowledgeDocument, TranscriptSegment, VideoItem
 from .naming import library_filename_stem, library_relative_directory
 from .qr_login import bili_dl_login_and_save, login_and_save
@@ -100,6 +101,26 @@ def process(
     outputs = asyncio.run(services.pipeline.run(job_id, item, language, synthesize, force_refresh))
     for kind, path in outputs.items():
         typer.echo(f"{kind}: {path}")
+
+
+@app.command("export-light-player")
+def export_light_player_command(
+    library_dir: Annotated[
+        Path | None, typer.Option(help="Knowledge bundle directory; defaults to library_dir")
+    ] = None,
+):
+    """Embed same-name synchronized LRC files in bundle M4A metadata."""
+    target = library_dir or Settings.load().library_dir
+    if not target.expanduser().is_dir():
+        raise typer.BadParameter(f"Library directory does not exist: {target}")
+    result = export_light_player(target)
+    typer.echo(f"updated: {result.updated}")
+    typer.echo(f"unchanged: {result.unchanged}")
+    typer.echo(f"missing_lrc: {result.missing_lrc}")
+    typer.echo(f"invalid_lrc: {result.invalid_lrc}")
+    typer.echo(f"failed: {result.failed}")
+    if result.invalid_lrc or result.failed:
+        raise typer.Exit(1)
 
 
 @app.command()

@@ -28,6 +28,8 @@ Video2Knowledge 是一套本地优先的处理流程，可将哔哩哔哩视频�
 
 - ✅ 将可编辑 Markdown 笔记保留在视频资料包根目录，并把源音频、同步歌词 LRC 和机器可读的 JSON 时间轴统一放入 `assets/`。
 - ✅ 将 Markdown 转换为语音，并可选封装为适用于 Apple Music 的 AAC/M4A 文件。
+- ✅ 为 Light Player 更新资料包中的 M4A：把完整的带时间戳 LRC 文本写入歌词元数据，
+  不重新编码音频，同时保留 LRC 和 JSON 边车文件。
 
 ### 知识与任务管理
 
@@ -167,6 +169,22 @@ v2k speak notes.md --title "知识音频" --author "作者"
 ```
 
 Apple Music 会导入带有普通内嵌歌词的 M4A 文件。由于 Apple Music 没有稳定公开的同步歌词导入格式，精确的时间同步信息会保存在同名的 LRC 和 JSON 文件中。
+
+为 Light Player 准备或更新所有视频资料包：
+
+```bash
+v2k export-light-player
+```
+
+该命令会查找每个 `assets/` 目录中同名的 `.m4a` 与 `.lrc`，把完整的带时间戳 LRC
+文本写入 M4A 的 `©lyr` 元数据，并报告已更新、未变化、缺少 LRC、LRC 无效及失败数量。
+程序先修改临时 M4A 副本，验证成功后再原子替换原文件。整个过程不会解码或重新编码音轨；
+`.lrc`、时间轴 JSON 和 metadata JSON 仍然独立保存且不会被修改。更新非默认知识库时可使用
+`--library-dir PATH`。
+
+Light Player 可能会缓存旧导入的元数据。对于已经导入过的歌曲，需要先从 Light Player 曲库
+删除，再重新导入更新后的 M4A；直接重复导入同一路径仍可能显示旧缓存。同时请保持 Light
+Player 的自动解析内嵌歌词功能开启。
 
 ## 数据目录结构
 
