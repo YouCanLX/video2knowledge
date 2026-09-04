@@ -1,6 +1,5 @@
 {
   "library_dir": "library",
-  "media_dir": "media",
   "database_path": "library.db",
   "bili_dl_dir": "/absolute/path/to/video2knowledge/vendor/bili-dl",
   "cookie_file": "bilibili-cookies.txt",

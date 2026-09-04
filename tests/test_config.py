@@ -23,7 +23,7 @@ def test_settings_resolve_relative_paths_from_data_directory(tmp_path):
     settings = Settings.load(tmp_path)
 
     assert settings.library_dir == (tmp_path / "knowledge").resolve()
-    assert settings.media_dir == (tmp_path / "downloads").resolve()
+    assert settings.legacy_media_dir == (tmp_path / "downloads").resolve()
     assert settings.database_path == (tmp_path / "state/library.db").resolve()
     assert settings.cookie_file == (tmp_path / "secrets/bilibili-cookies.txt").resolve()
     assert settings.mlx_base_url == "http://127.0.0.1:9000"
@@ -38,7 +38,7 @@ def test_settings_save_portable_paths(tmp_path):
 
     payload = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
     assert payload["library_dir"] == "library"
-    assert payload["media_dir"] == "media"
+    assert "media_dir" not in payload
     assert payload["database_path"] == "library.db"
     assert payload["cookie_file"] == "bilibili-cookies.txt"
     assert payload["mlx_audio_command"] == DEFAULT_MLX_AUDIO_COMMAND

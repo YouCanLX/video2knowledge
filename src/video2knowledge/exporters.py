@@ -151,12 +151,16 @@ def parse_markdown_text(markdown_text: str) -> list[str]:
 
 def write_bundle(document: KnowledgeDocument, directory: Path) -> dict[str, Path]:
     directory.mkdir(parents=True, exist_ok=True)
+    assets_dir = directory / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
     slug = library_filename_stem(document.video)
-    md_path, lrc_path, json_path, metadata_path = (
-        directory / f"{slug}{suffix}" for suffix in (".md", ".lrc", ".json", ".metadata.json")
-    )
+    md_path = directory / f"{slug}.md"
+    lrc_path = assets_dir / f"{slug}.lrc"
+    json_path = assets_dir / f"{slug}.json"
+    metadata_path = assets_dir / f"{slug}.metadata.json"
     video_created_at = format_video_created_at(document.video.published_at)
-    md_path.write_text(render_markdown(document), encoding="utf-8")
+    if not md_path.exists():
+        md_path.write_text(render_markdown(document), encoding="utf-8")
     lrc_path.write_text(
         render_lrc(
             document.segments,

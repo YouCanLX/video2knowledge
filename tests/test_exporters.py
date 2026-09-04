@@ -97,6 +97,17 @@ def test_write_bundle_includes_video_creation_metadata(tmp_path):
     assert timeline[0]["text"] == "First sentence"
 
 
+def test_write_bundle_does_not_overwrite_user_edited_markdown(tmp_path):
+    outputs = write_bundle(document(), tmp_path)
+    outputs["markdown"].write_text("# My edited notes\n", encoding="utf-8")
+    outputs["lyrics"].unlink()
+
+    rebuilt = write_bundle(document(), tmp_path)
+
+    assert rebuilt["markdown"].read_text(encoding="utf-8") == "# My edited notes\n"
+    assert rebuilt["lyrics"].is_file()
+
+
 def test_parse_markdown_for_speech():
     source = (
         "---\ntitle: Test\n---\n# Heading\n\n- **Key** [Link](https://example.com)\n<div>Tip</div>"
@@ -141,7 +152,10 @@ def test_bundle_uses_collection_filename_inside_unchanged_directory(tmp_path):
 
     assert directory.name == "Author_Test Title_BV1test"
     assert outputs["markdown"].name == "Author_Trading Course_Test Title_BV1test.md"
-    assert all(path.parent == directory for path in outputs.values())
+    assert outputs["markdown"].parent == directory
+    assert all(
+        path.parent == directory / "assets" for key, path in outputs.items() if key != "markdown"
+    )
 
 
 def test_library_stem_replaces_path_characters_and_limits_utf8_bytes():

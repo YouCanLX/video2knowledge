@@ -24,8 +24,7 @@ from .adapters.llm import _resolve_codex_executable, create_enricher
 from .config import Settings
 from .mlx_service import MlxAudioServiceManager
 from .models import JobStatus, VideoItem
-from .pipeline import PipelineJobRunner, find_cached_media_files
-from .repository import LibraryRepository
+from .pipeline import PipelineJobRunner
 from .services import build_services
 from .urls import extract_bilibili_bvid, extract_bilibili_creator_id
 
@@ -78,7 +77,6 @@ class DeleteDownloadHistoryRequest(BaseModel):
 
 
 class RuntimeSettingsRequest(BaseModel):
-    media_dir: str = Field(min_length=1)
     library_dir: str = Field(min_length=1)
     mlx_base_url: str = Field(min_length=1)
     mlx_audio_command: str = Field(min_length=1)
@@ -99,7 +97,6 @@ def _runtime_path_value(path: Path, data_dir: Path) -> str:
 
 def _settings_payload(settings: Settings) -> dict[str, str | float]:
     return {
-        "media_dir": _runtime_path_value(settings.media_dir, settings.data_dir),
         "library_dir": _runtime_path_value(settings.library_dir, settings.data_dir),
         "mlx_base_url": settings.mlx_base_url,
         "mlx_audio_command": settings.mlx_audio_command,
@@ -117,50 +114,25 @@ def _resolve_runtime_path(data_dir: Path, value: str) -> Path:
     return (path if path.is_absolute() else data_dir / path).resolve()
 
 
-def _job_file_candidates(job: dict, media_dir: Path) -> list[Path]:
-    source_id = str(job["source"]["source_id"])
-    paths = {Path(value).expanduser() for value in job["outputs"].values() if value}
-    paths.update(find_cached_media_files(media_dir, source_id))
-    return sorted(paths, key=str)
+def _job_file_candidates(job: dict) -> list[Path]:
+    return sorted({Path(value).expanduser() for value in job["outputs"].values() if value}, key=str)
 
 
-def _delete_job_files(
-    job: dict, media_dir: Path, repository: LibraryRepository
-) -> tuple[list[str], list[str]]:
+def _delete_job_files(job: dict) -> tuple[list[str], list[str]]:
     source_id = str(job["source"]["source_id"])
-    source_asset = repository.get_media_asset_for_source(source_id)
-    repository.delete_media_reference(source_id)
     removed: list[str] = []
     skipped: list[str] = []
-    candidates = set(_job_file_candidates(job, media_dir))
-    if source_asset:
-        candidates.add(Path(source_asset["path"]).expanduser())
-    for path in sorted(candidates, key=str):
-        resolved_path = str(path.expanduser().resolve())
-        asset = repository.get_media_asset_by_path(resolved_path)
-        if asset and repository.media_reference_count(asset["sha256"]) > 0:
-            skipped.append(str(path))
-            continue
-        is_unreferenced_source_asset = source_asset is not None and resolved_path == str(
-            Path(source_asset["path"]).expanduser().resolve()
-        )
-        if (
-            not asset
-            and not is_unreferenced_source_asset
-            and source_id.casefold() not in str(path).casefold()
-        ):
+    for path in _job_file_candidates(job):
+        if source_id.casefold() not in str(path).casefold():
             skipped.append(str(path))
             continue
         if not path.exists() and not path.is_symlink():
-            if asset:
-                repository.delete_media_asset_if_unreferenced(asset["sha256"])
             continue
         path.unlink()
         removed.append(str(path))
-        if asset:
-            repository.delete_media_asset_if_unreferenced(asset["sha256"])
         with suppress(OSError):
             path.parent.rmdir()
+            path.parent.parent.rmdir()
     return removed, skipped
 
 
@@ -630,7 +602,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         skipped: list[str] = []
         if delete_files:
             try:
-                removed, skipped = _delete_job_files(job, settings.media_dir, repository)
+                removed, skipped = _delete_job_files(job)
             except OSError as exc:
                 raise HTTPException(500, f"Could not delete a local file: {exc}") from exc
             repository.delete_document(str(job["source"]["source_id"]))
@@ -708,9 +680,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body.delete_files:
             try:
                 for source_id, entry in entries.items():
-                    entry_removed, entry_skipped = _delete_job_files(
-                        entry, settings.media_dir, repository
-                    )
+                    entry_removed, entry_skipped = _delete_job_files(entry)
                     removed.extend(entry_removed)
                     skipped.extend(entry_skipped)
                     repository.delete_document(source_id)
@@ -747,7 +717,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if mlx_changed and mlx_manager.is_managed_running:
             raise HTTPException(409, "Stop the managed MLX Audio service before changing it")
 
-        settings.media_dir = _resolve_runtime_path(settings.data_dir, body.media_dir)
         settings.library_dir = _resolve_runtime_path(settings.data_dir, body.library_dir)
         settings.mlx_base_url = new_mlx_url
         settings.mlx_audio_command = body.mlx_audio_command.strip()
@@ -760,12 +729,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.ensure_dirs()
         settings.save()
 
-        services.pipeline.media_dir = settings.media_dir
         services.pipeline.library_dir = settings.library_dir
         services.pipeline.enricher = create_enricher(settings)
         services.audio.base_url = settings.mlx_base_url
         if isinstance(provider, BiliDlProvider):
-            provider.set_download_dir(settings.media_dir)
+            provider.set_download_dir(settings.library_dir / ".staging")
         mlx_manager.configure(settings.mlx_audio_command, settings.mlx_base_url)
         return _settings_payload(settings)
 

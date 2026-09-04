@@ -10,6 +10,7 @@ from .config import Settings
 from .pipeline import Pipeline
 from .ports import VideoProvider
 from .repository import LibraryRepository
+from .storage import migrate_legacy_bundles
 
 
 @dataclass(slots=True)
@@ -31,7 +32,7 @@ def build_services(settings: Settings) -> ApplicationServices:
         else BilibiliProvider(cookie_file=settings.cookie_file)
     )
     if isinstance(provider, BiliDlProvider):
-        provider.set_download_dir(settings.media_dir)
+        provider.set_download_dir(settings.library_dir / ".staging")
     audio = MlxAudioClient(
         base_url=settings.mlx_base_url,
         stt_model=settings.mlx_stt_model,
@@ -39,13 +40,13 @@ def build_services(settings: Settings) -> ApplicationServices:
         voice=settings.mlx_tts_voice,
     )
     repository = LibraryRepository(settings.database_path)
+    migrate_legacy_bundles(settings, repository)
     pipeline = Pipeline(
         provider=provider,
         stt=audio,
         enricher=create_enricher(settings),
         tts=audio,
         repository=repository,
-        media_dir=settings.media_dir,
         library_dir=settings.library_dir,
     )
     return ApplicationServices(provider, audio, repository, pipeline)

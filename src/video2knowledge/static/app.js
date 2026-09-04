@@ -1731,7 +1731,6 @@ function toggleLlmSettings() {
 
 function runtimeSettingsPayload() {
   return {
-    media_dir: select("#media-dir").value.trim(),
     library_dir: select("#library-dir").value.trim(),
     mlx_base_url: select("#mlx-base-url").value.trim(),
     mlx_audio_command: select("#mlx-command").value.trim(),
@@ -1757,7 +1756,6 @@ async function saveSettings() {
 async function loadSettings() {
   try {
     const data = await requestJson("/api/settings");
-    select("#media-dir").value = data.media_dir;
     select("#library-dir").value = data.library_dir;
     select("#mlx-base-url").value = data.mlx_base_url;
     select("#mlx-command").value = data.mlx_audio_command;

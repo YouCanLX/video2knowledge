@@ -12,6 +12,7 @@ the in-development `0.1.0` alpha version.
 
 | Type | Change | Commit |
 | --- | --- | --- |
+| Breaking change | Replace separate media and library roots with self-contained video bundles containing protected root Markdown and an `assets/` directory; migrate legacy split outputs on startup. | Pending |
 | Bug fix | Backfill missing creator avatars in legacy collection and video history. | `1b8f0e2` |
 | Improvement | Update collection filter choices to match the selected creators. | `2c5382f` |
 | Performance | Pipeline up to three concurrent downloads into serialized local transcription and concurrent LLM enrichment. | `a57d95e` |

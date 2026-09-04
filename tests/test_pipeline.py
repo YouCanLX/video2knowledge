@@ -80,7 +80,6 @@ def test_runner_limits_concurrent_downloads_to_three(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         runner = PipelineJobRunner(pipeline)
@@ -163,7 +162,6 @@ def test_runner_pipelines_download_transcription_and_enrichment(tmp_path):
             llm,
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         runner = PipelineJobRunner(pipeline)
@@ -195,7 +193,6 @@ def test_runner_serializes_duplicate_source_ids(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         runner = PipelineJobRunner(pipeline)
@@ -221,7 +218,6 @@ def test_runner_pauses_active_job_at_safe_stage_boundary_and_resumes(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         runner = PipelineJobRunner(pipeline)
@@ -234,10 +230,10 @@ def test_runner_pauses_active_job_at_safe_stage_boundary_and_resumes(tmp_path):
 
         provider.release.set()
         await wait_for_job_status(repo, job_id, "paused")
-        assert repo.get_job(job_id)["progress"] == 0.28
+        assert repo.get_job(job_id)["progress"] == 0.32
 
         resumed = runner.resume(job_id)
-        assert resumed["status"] == "downloading"
+        assert resumed["status"] == "transcribing"
         await runner.queue.join()
         assert repo.get_job(job_id)["status"] == "complete"
         runner._worker.cancel()
@@ -255,7 +251,6 @@ def test_runner_pauses_queued_job_without_blocking_other_job(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         runner = PipelineJobRunner(pipeline)
@@ -303,7 +298,6 @@ def test_runner_restarts_failed_job_with_original_options(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         runner = PipelineJobRunner(pipeline)
@@ -338,7 +332,6 @@ def test_runner_batch_restart_validates_every_job_before_requeueing(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         runner = PipelineJobRunner(pipeline)
@@ -381,7 +374,6 @@ def test_pipeline_reuses_cached_media_unless_forced(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         item = VideoItem("bilibili", "BV1CACHE", "Cached", "https://example.test/video")
@@ -433,7 +425,6 @@ def test_pipeline_reuses_all_completed_outputs_unless_missing_or_forced(tmp_path
             llm,
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         item = VideoItem("bilibili", "BV1COMPLETE", "Complete", "https://example.test/video")
@@ -468,7 +459,7 @@ def test_pipeline_reuses_all_completed_outputs_unless_missing_or_forced(tmp_path
     asyncio.run(scenario())
 
 
-def test_pipeline_deduplicates_identical_media_across_source_ids(tmp_path):
+def test_pipeline_keeps_media_inside_each_video_bundle(tmp_path):
     async def scenario():
         provider = FakeProvider()
         repo = LibraryRepository(tmp_path / "db.sqlite")
@@ -478,7 +469,6 @@ def test_pipeline_deduplicates_identical_media_across_source_ids(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         first = VideoItem("bilibili", "BV1FIRST", "First", "https://example.test/first")
@@ -490,14 +480,14 @@ def test_pipeline_deduplicates_identical_media_across_source_ids(tmp_path):
         second_outputs = await pipeline.run(second_job, second)
 
         first_media = Path(first_outputs["source_media"])
-        assert second_outputs["source_media"] == str(first_media)
+        second_media = Path(second_outputs["source_media"])
+        assert second_media != first_media
         assert first_media.is_file()
-        assert ".assets" in first_media.parts
-        assert not (tmp_path / "media" / "BV1SECOND" / "audio.wav").exists()
-        asset = repo.get_media_asset_for_source(first.source_id)
-        assert asset == repo.get_media_asset_for_source(second.source_id)
-        assert repo.media_reference_count(asset["sha256"]) == 2
-        assert repo.connection.execute("SELECT COUNT(*) FROM media_assets").fetchone()[0] == 1
+        assert second_media.is_file()
+        assert first_media.parent.name == "assets"
+        assert second_media.parent.name == "assets"
+        assert first.source_id in first_media.name
+        assert second.source_id in second_media.name
 
     asyncio.run(scenario())
 
@@ -511,7 +501,6 @@ def test_collection_outputs_use_author_and_collection_directory_hierarchy(tmp_pa
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         item = VideoItem(
@@ -533,8 +522,13 @@ def test_collection_outputs_use_author_and_collection_directory_hierarchy(tmp_pa
     )
 
     assert output_directory.is_dir()
-    assert outputs["audio"] == str(output_directory / "Creator_Course_Lesson_BV1COLLECTION-tts.wav")
+    assert outputs["audio"] == str(
+        output_directory / "assets" / "Creator_Course_Lesson_BV1COLLECTION-tts.wav"
+    )
     assert outputs["markdown"] == str(output_directory / "Creator_Course_Lesson_BV1COLLECTION.md")
+    assert outputs["source_media"] == str(
+        output_directory / "assets" / "Creator_Course_Lesson_BV1COLLECTION.wav"
+    )
 
 
 def test_pipeline_ignores_empty_cached_media(tmp_path):
@@ -547,11 +541,17 @@ def test_pipeline_ignores_empty_cached_media(tmp_path):
             FakeLLM(),
             FakeTTS(),
             repo,
-            tmp_path / "media",
             tmp_path / "library",
         )
         item = VideoItem("bilibili", "BV1EMPTY", "Empty", "https://example.test/video")
-        empty_cache = tmp_path / "media" / "BV1EMPTY" / "audio.m4a"
+        empty_cache = (
+            tmp_path
+            / "library"
+            / "UnknownCreator"
+            / "UnknownCreator_Empty_BV1EMPTY"
+            / "assets"
+            / "UnknownCreator_Empty_BV1EMPTY.m4a"
+        )
         empty_cache.parent.mkdir(parents=True)
         empty_cache.touch()
 

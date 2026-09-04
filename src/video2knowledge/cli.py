@@ -56,7 +56,9 @@ def login():
     bundled = Path.cwd() / "vendor" / "bili-dl"
     bili_dl_dir = settings.bili_dl_dir or bundled
     cookie_path = settings.data_dir / "bilibili-cookies.txt"
-    native_config = bili_dl_login_and_save(bili_dl_dir, cookie_path, settings.media_dir)
+    native_config = bili_dl_login_and_save(
+        bili_dl_dir, cookie_path, settings.library_dir / ".staging"
+    )
     settings.bili_dl_dir = bili_dl_dir
     settings.cookie_file = cookie_path
     settings.save()
@@ -117,12 +119,13 @@ def speak(
     item = VideoItem("markdown", source_id, title, markdown_file.resolve().as_uri(), author)
     stem = library_filename_stem(item)
     output_dir = settings.library_dir / library_relative_directory(item)
-    wav = services.audio.synthesize(segments, output_dir / f"{stem}.wav", language)
+    assets_dir = output_dir / "assets"
+    wav = services.audio.synthesize(segments, assets_dir / f"{stem}.wav", language)
     document = KnowledgeDocument(item, segments, language=language, audio_path=wav)
     outputs = write_bundle(document, output_dir)
     outputs["audio"] = wav
     if apple_music:
-        outputs.update(export_apple_music(document, wav, output_dir))
+        outputs.update(export_apple_music(document, wav, assets_dir))
     for kind, path in outputs.items():
         typer.echo(f"{kind}: {path}")
 

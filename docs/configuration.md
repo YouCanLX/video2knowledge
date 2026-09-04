@@ -11,8 +11,7 @@ Run `v2k init` to create a complete configuration, or copy `config.example.json`
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `library_dir` | `library` | Markdown, LRC, JSON, and synthesized output |
-| `media_dir` | `media` | Downloaded source media and download cache |
+| `library_dir` | `library` | Self-contained video bundles with Markdown and `assets/` |
 | `database_path` | `library.db` | SQLite job and document index |
 | `bili_dl_dir` | `null` | Absolute path to the local `bili-dl` checkout |
 | `cookie_file` | `null` | Netscape cookie file used by Bilibili adapters |
@@ -65,11 +64,12 @@ The GUI exposes both backends and defaults to Codex CLI.
 
 ## GUI runtime settings
 
-The **Runtime Settings** panel can independently change the source-media download directory
-and the Markdown/knowledge export directory. Relative paths resolve from the active data
-directory; absolute paths remain absolute. Paths inside the data directory are displayed in
-their portable relative form, such as `media` and `library`. Changes apply to new jobs and
-are persisted in `config.json`.
+The **Runtime Settings** panel changes the unified video-bundle directory. Relative paths
+resolve from the active data directory; absolute paths remain absolute. Paths inside the data
+directory are displayed in their portable relative form, such as `library`. Changes apply to
+new jobs and are persisted in `config.json`. On startup, a legacy `media_dir` setting is used
+once to locate split source media, migrate it into each video's `assets/` directory, and is
+omitted the next time the configuration is saved.
 
 ## Security
 

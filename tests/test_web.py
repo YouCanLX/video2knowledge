@@ -320,7 +320,6 @@ def test_runtime_settings_are_exposed_and_persisted(tmp_path):
             payload = initial.json()
             payload.update(
                 {
-                    "media_dir": "custom-downloads",
                     "library_dir": "custom-library",
                     "mlx_audio_command": "python -m mlx_audio.server --port 9000",
                     "mlx_base_url": "http://127.0.0.1:9000",
@@ -336,12 +335,9 @@ def test_runtime_settings_are_exposed_and_persisted(tmp_path):
 
     assert initial.status_code == 200
     assert initial.json()["llm_backend"] == "codex_cli"
-    assert initial.json()["media_dir"] == "media"
     assert initial.json()["library_dir"] == "library"
     assert updated.status_code == 200
-    assert updated.json()["media_dir"] == "custom-downloads"
     assert updated.json()["library_dir"] == "custom-library"
-    assert settings.media_dir == (tmp_path / "custom-downloads").resolve()
     assert settings.library_dir == (tmp_path / "custom-library").resolve()
     assert Settings.load(tmp_path).llm_backend == "openai_compatible"
 
@@ -510,7 +506,7 @@ def test_delete_job_with_local_files_and_document(tmp_path):
         output_dir.mkdir(parents=True)
         markdown = output_dir / "Author_Delete_BV1DELETE.md"
         markdown.write_text("delete", encoding="utf-8")
-        media = settings.media_dir / "Author" / "Delete_BV1DELETE.m4a"
+        media = output_dir / "assets" / "Author_Delete_BV1DELETE.m4a"
         media.parent.mkdir(parents=True)
         media.write_bytes(b"media")
         job_id = repo.create_job(item)
@@ -532,39 +528,38 @@ def test_delete_job_with_local_files_and_document(tmp_path):
     assert not media.exists()
 
 
-def test_shared_media_is_deleted_only_after_its_last_reference(tmp_path):
+def test_deleting_one_bundle_does_not_remove_another_bundle_media(tmp_path):
     async def scenario():
         settings = Settings.load(tmp_path)
         app = create_app(settings)
         repo = app.state.services.repository
-        asset = settings.media_dir / ".assets" / "ab" / "asset.m4a"
-        asset.parent.mkdir(parents=True)
-        asset.write_bytes(b"shared")
-        digest = "ab" * 32
         jobs = []
+        assets = []
         for source_id in ("BV1SHARED1", "BV1SHARED2"):
             item = VideoItem("bilibili", source_id, source_id, "https://example.test")
+            asset = settings.library_dir / source_id / "assets" / f"{source_id}.m4a"
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"shared")
             job_id = repo.create_job(item)
             repo.update_job(job_id, JobStatus.COMPLETE, 1, outputs={"source_media": str(asset)})
-            repo.save_media_asset(source_id, digest, str(asset.resolve()), asset.stat().st_size)
             jobs.append(job_id)
+            assets.append(asset)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             first = await client.delete(f"/api/jobs/{jobs[0]}?delete_files=true")
-            exists_after_first = asset.exists()
+            second_exists_after_first = assets[1].exists()
             second = await client.delete(f"/api/jobs/{jobs[1]}?delete_files=true")
-        return first, second, exists_after_first, asset, repo, digest
+        return first, second, second_exists_after_first, assets
 
-    first, second, exists_after_first, asset, repo, digest = asyncio.run(scenario())
+    first, second, second_exists_after_first, assets = asyncio.run(scenario())
 
     assert first.status_code == 200
-    assert str(asset) in first.json()["skipped_files"]
-    assert exists_after_first is True
+    assert str(assets[0]) in first.json()["removed_files"]
+    assert second_exists_after_first is True
     assert second.status_code == 200
-    assert str(asset) in second.json()["removed_files"]
-    assert not asset.exists()
-    assert repo.get_media_asset(digest) is None
+    assert str(assets[1]) in second.json()["removed_files"]
+    assert not assets[1].exists()
 
 
 def test_active_job_cannot_be_deleted(tmp_path, monkeypatch):

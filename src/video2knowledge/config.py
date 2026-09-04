@@ -37,8 +37,8 @@ def _portable_path(path: Path | None, root: Path) -> str | None:
 class Settings:
     data_dir: Path
     library_dir: Path
-    media_dir: Path
     database_path: Path
+    legacy_media_dir: Path | None = None
     bili_dl_dir: Path | None = None
     cookie_file: Path | None = None
     mlx_base_url: str = "http://127.0.0.1:8000"
@@ -65,8 +65,12 @@ class Settings:
         return cls(
             data_dir=root,
             library_dir=_resolve_path(root, raw.get("library_dir"), "library"),
-            media_dir=_resolve_path(root, raw.get("media_dir"), "media"),
             database_path=_resolve_path(root, raw.get("database_path"), "library.db"),
+            legacy_media_dir=(
+                _resolve_path(root, raw.get("media_dir"), "media")
+                if raw.get("media_dir") or (root / "media").exists()
+                else None
+            ),
             bili_dl_dir=(
                 _resolve_path(root, raw["bili_dl_dir"], ".") if raw.get("bili_dl_dir") else None
             ),
@@ -89,14 +93,13 @@ class Settings:
         )
 
     def ensure_dirs(self) -> None:
-        for path in (self.data_dir, self.library_dir, self.media_dir):
+        for path in (self.data_dir, self.library_dir):
             path.mkdir(parents=True, exist_ok=True)
 
     def save(self) -> None:
         self.ensure_dirs()
         payload = {
             "library_dir": _portable_path(self.library_dir, self.data_dir),
-            "media_dir": _portable_path(self.media_dir, self.data_dir),
             "database_path": _portable_path(self.database_path, self.data_dir),
             "bili_dl_dir": _portable_path(self.bili_dl_dir, self.data_dir),
             "cookie_file": _portable_path(self.cookie_file, self.data_dir),

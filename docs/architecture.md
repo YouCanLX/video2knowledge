@@ -30,11 +30,12 @@ SQLite repository + Markdown/LRC/JSON exporters
 | `config.py` | Data-directory discovery and portable JSON configuration |
 | `services.py` | Shared dependency construction for CLI and web entry points |
 | `ports.py` | Provider, STT, TTS, and enrichment contracts |
-| `pipeline.py` | Download-cache selection and processing orchestration |
+| `pipeline.py` | Bundle-local media reuse and processing orchestration |
 | `repository.py` | SQLite job and knowledge-document index |
 | `exporters.py` | Markdown, LRC, JSON, and Markdown parsing |
 | `apple_music.py` | FFmpeg-based AAC/M4A packaging |
 | `naming.py` | Cross-platform library directory and file naming |
+| `storage.py` | Migration of legacy split media and generated artifacts into bundles |
 | `adapters/bilibili.py` | Public Bilibili metadata/search and `yt-dlp` download |
 | `adapters/bili_dl.py` | Authenticated native `bili-dl` integration |
 | `adapters/mlx_audio.py` | MLX Audio HTTP client and local decoding |
@@ -50,13 +51,14 @@ rather than adapter-specific data.
 ## Processing lifecycle
 
 1. Resolve canonical video metadata.
-2. Reuse media matching the source ID unless force refresh is enabled.
+2. Reuse source media from the video's `assets/` directory unless force refresh is enabled.
 3. Enter the single-slot local speech stage and transcribe the audio into timestamped segments.
 4. Enrich the transcript in a separately bounded stage; preserve it even when enrichment fails.
 5. Optionally synthesize speech and rebuild timestamps from actual audio durations.
-6. Write the output bundle and update the SQLite document index.
+6. Keep Markdown at the bundle root, write media and timeline assets under `assets/`, and
+   update the SQLite document index.
 
 The web application runs jobs as an in-memory pipeline. Up to three downloads and three LLM
 enrichments may run concurrently, while local MLX transcription and synthesis share one slot
 to avoid competing for unified memory. Per-source locks prevent duplicate submissions from
-writing the same media and library paths concurrently.
+writing the same bundle paths concurrently.

@@ -349,6 +349,39 @@ class LibraryRepository:
         ).fetchall()
         return [self._history_dict(row) for row in rows]
 
+    def replace_output_paths(self, source_id: str, replacements: dict[str, str]) -> None:
+        """Replace artifact paths for every record associated with one source."""
+        for table in ("jobs", "download_history"):
+            rows = self.connection.execute(
+                f"""SELECT rowid, outputs_json FROM {table}
+                    WHERE json_extract(source_json, '$.source_id')=?""",
+                (source_id,),
+            ).fetchall()
+            for row in rows:
+                outputs = json.loads(row["outputs_json"])
+                outputs.update(
+                    {key: value for key, value in replacements.items() if key in outputs}
+                )
+                self.connection.execute(
+                    f"UPDATE {table} SET outputs_json=? WHERE rowid=?",
+                    (json.dumps(outputs, ensure_ascii=False), row["rowid"]),
+                )
+        document = self.connection.execute(
+            "SELECT markdown_path, audio_path FROM documents WHERE source_id=?", (source_id,)
+        ).fetchone()
+        if document:
+            self.connection.execute(
+                """UPDATE documents SET
+                     markdown_path=?, audio_path=?
+                   WHERE source_id=?""",
+                (
+                    replacements.get("markdown", document["markdown_path"]),
+                    replacements.get("audio", document["audio_path"]),
+                    source_id,
+                ),
+            )
+        self.connection.commit()
+
     def backfill_creator_avatar(self, author_id: str, avatar_url: str) -> int:
         """Add a missing creator avatar to matching current jobs and history records."""
         if not author_id or not avatar_url:

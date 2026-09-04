@@ -22,8 +22,8 @@ speech and an Apple Music-compatible M4A file.
   independently pipelining transcription and LLM enrichment.
 - ✅ Reuses complete media, transcription, summary, and export results by default and supports
   an explicit force-refresh option.
-- ✅ Computes SHA-256 after download and stores byte-identical media once, with source-to-asset
-  references protecting shared files until their final reference is removed.
+- ✅ Stores each source audio file with its transcript artifacts inside a self-contained video
+  bundle that can be moved, backed up, or deleted independently.
 
 ### Models and interfaces
 
@@ -37,7 +37,8 @@ speech and an Apple Music-compatible M4A file.
 
 ### Speech and media
 
-- ✅ Stores readable Markdown plus synchronized LRC and machine-readable JSON timelines.
+- ✅ Keeps the editable Markdown note at the video-bundle root and places source audio,
+  synchronized LRC, and machine-readable JSON timelines together under `assets/`.
 - ✅ Converts Markdown to speech and optionally packages it as AAC/M4A for Apple Music.
 
 ### Knowledge and task management
@@ -148,7 +149,7 @@ At minimum, set the absolute path to the local `bili-dl` checkout:
 ```
 
 Paths inside the data directory may be relative. `v2k init` writes portable relative paths
-for the library, media directory, database, and cookie file.
+for the bundle library, database, and cookie file.
 
 ## Bilibili login
 
@@ -178,9 +179,9 @@ Open <http://127.0.0.1:8765>, paste a Bilibili URL, or search for a video. Enabl
 Use **Force refresh download and all processing** only when the media, transcription,
 summary, and exports must all be regenerated. Otherwise, a complete existing result for the
 same video and language is reused.
-The **Runtime Settings** panel independently configures download and Markdown export paths,
-selects the summary backend (Codex CLI by default), and starts, monitors, or stops the local
-MLX Audio service.
+The **Runtime Settings** panel configures the unified knowledge-bundle path, selects the
+summary backend (Codex CLI by default), and starts, monitors, or stops the local MLX Audio
+service.
 Completed queue entries show their generated and source-media paths. Terminal jobs can be
 removed from the queue while keeping local files, or removed together with their associated
 local files after an explicit confirmation. Each generated file can also be opened with its
@@ -212,16 +213,21 @@ for importing synchronized lyrics.
 ├── config.json
 ├── bilibili-cookies.txt
 ├── library.db
-├── media/
 └── library/
     └── creator_content-title_video-id/
         ├── creator_content-title_video-id.md
-        ├── creator_content-title_video-id.lrc
-        └── creator_content-title_video-id.json
+        └── assets/
+            ├── creator_content-title_video-id.m4a
+            ├── creator_content-title_video-id.lrc
+            ├── creator_content-title_video-id.json
+            └── creator_content-title_video-id.metadata.json
 ```
 
-Markdown is the source of truth. Directory and file names share the
-`creator_content-title_video-id` convention and are sanitized for macOS and Windows.
+Markdown is the user-editable knowledge document, while JSON retains the generated transcript
+timeline used to rebuild media-side artifacts. Legacy `media_dir` configurations and split
+outputs are migrated into bundles when the application starts. Directory and file names share
+the `creator_content-title_video-id` convention and are sanitized for macOS and Windows.
+Rebuilding missing media-side assets does not overwrite an existing Markdown note.
 
 ## Architecture
 
