@@ -10,7 +10,7 @@ from .config import Settings
 from .pipeline import Pipeline
 from .ports import VideoProvider
 from .repository import LibraryRepository
-from .storage import migrate_legacy_bundles
+from .storage import migrate_legacy_bundles, supplement_legacy_media
 
 
 @dataclass(slots=True)
@@ -41,6 +41,7 @@ def build_services(settings: Settings) -> ApplicationServices:
     )
     repository = LibraryRepository(settings.database_path)
     migrate_legacy_bundles(settings, repository)
+    supplement_legacy_media(settings, repository)
     pipeline = Pipeline(
         provider=provider,
         stt=audio,

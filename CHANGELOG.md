@@ -12,6 +12,7 @@ the in-development `0.1.0` alpha version.
 
 | Type | Change | Commit |
 | --- | --- | --- |
+| Improvement | Supplement legacy media migration with video-ID, filename, and embedded-metadata matching, quarantining unresolved files before retiring the old media root. | Pending |
 | Breaking change | Replace separate media and library roots with self-contained video bundles containing protected root Markdown and an `assets/` directory; migrate legacy split outputs on startup. | `be19597` |
 | Bug fix | Backfill missing creator avatars in legacy collection and video history. | `1b8f0e2` |
 | Improvement | Update collection filter choices to match the selected creators. | `2c5382f` |

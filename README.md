@@ -228,6 +228,9 @@ timeline used to rebuild media-side artifacts. Legacy `media_dir` configurations
 outputs are migrated into bundles when the application starts. Directory and file names share
 the `creator_content-title_video-id` convention and are sanitized for macOS and Windows.
 Rebuilding missing media-side assets does not overwrite an existing Markdown note.
+The legacy migration supplements database paths with unique video-ID, normalized filename,
+and embedded-metadata matches. Files that still cannot be assigned safely are preserved under
+`library/.unmatched-media/` before the empty legacy `media/` directory is removed.
 
 ## Architecture
 

@@ -69,7 +69,10 @@ resolve from the active data directory; absolute paths remain absolute. Paths in
 directory are displayed in their portable relative form, such as `library`. Changes apply to
 new jobs and are persisted in `config.json`. On startup, a legacy `media_dir` setting is used
 once to locate split source media, migrate it into each video's `assets/` directory, and is
-omitted the next time the configuration is saved.
+omitted the next time the configuration is saved. A supplemental pass matches remaining media
+by unique video ID, normalized filename, and available embedded metadata. Unmatched or
+conflicting files are moved without modification to `library/.unmatched-media/`; the legacy
+root is removed only after it is empty.
 
 ## Security
 
