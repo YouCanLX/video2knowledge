@@ -12,7 +12,7 @@ the in-development `0.1.0` alpha version.
 
 | Type | Change | Commit |
 | --- | --- | --- |
-| Feature | Add a dedicated Light Player export that embeds timestamped LRC text in M4A lyrics metadata without re-encoding audio or modifying sidecars. | Pending |
+| Feature | Add a dedicated Light Player export that embeds timestamped LRC text in M4A lyrics metadata without re-encoding audio or modifying sidecars. | `6c3c778` |
 | Improvement | Supplement legacy media migration with video-ID, filename, and embedded-metadata matching, quarantining unresolved files before retiring the old media root. | `6c30d51` |
 | Breaking change | Replace separate media and library roots with self-contained video bundles containing protected root Markdown and an `assets/` directory; migrate legacy split outputs on startup. | `be19597` |
 | Bug fix | Backfill missing creator avatars in legacy collection and video history. | `1b8f0e2` |
