@@ -5,12 +5,13 @@ import re
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 
 from .apple_music import export_apple_music
 from .config import Settings
 from .exporters import parse_markdown_text, write_bundle
-from .light_player import export_light_player
+from .light_player import export_light_player, sync_light_player_playlists
 from .models import KnowledgeDocument, TranscriptSegment, VideoItem
 from .naming import library_filename_stem, library_relative_directory
 from .qr_login import bili_dl_login_and_save, login_and_save
@@ -120,6 +121,39 @@ def export_light_player_command(
     typer.echo(f"invalid_lrc: {result.invalid_lrc}")
     typer.echo(f"failed: {result.failed}")
     if result.invalid_lrc or result.failed:
+        raise typer.Exit(1)
+
+
+@app.command("sync-light-player-playlists")
+def sync_light_player_playlists_command(
+    light_player_url: Annotated[
+        str,
+        typer.Option(
+            "--url",
+            help="URL shown on Light Player's Transfer Songs & Lyrics screen",
+        ),
+    ],
+    library_dir: Annotated[
+        Path | None, typer.Option(help="Knowledge bundle directory; defaults to library_dir")
+    ] = None,
+    timeout: Annotated[float, typer.Option(help="HTTP timeout in seconds")] = 30,
+):
+    """Create creator/collection playlists through Light Player's transfer screen."""
+    target = library_dir or Settings.load().library_dir
+    if not target.expanduser().is_dir():
+        raise typer.BadParameter(f"Library directory does not exist: {target}")
+    try:
+        result = sync_light_player_playlists(target, light_player_url, timeout=timeout)
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        typer.echo(f"Light Player playlist sync failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"created: {result.created}")
+    typer.echo(f"updated: {result.updated}")
+    typer.echo(f"skipped: {result.skipped}")
+    typer.echo(f"matched_songs: {result.matched_songs}")
+    typer.echo(f"unmatched_songs: {result.unmatched_songs}")
+    typer.echo(f"invalid_metadata: {result.invalid_metadata}")
+    if result.unmatched_songs or result.invalid_metadata:
         raise typer.Exit(1)
 
 

@@ -226,6 +226,22 @@ its library and import the updated M4A files again; importing the same paths wit
 may continue showing the old cached state. Keep Light Player's automatic embedded-lyrics
 parsing enabled.
 
+To create or update Light Player playlists automatically, open **Transfer Songs & Lyrics**
+in Light Player, keep that screen open, and copy its displayed URL:
+
+```bash
+v2k sync-light-player-playlists --url http://device-address:port
+```
+
+The command reads each bundle's metadata and creates `creator - collection` playlists,
+falling back to the bundle's creator/collection directory hierarchy for migrated media without
+metadata JSON. A video without collection information is added to a creator-only playlist.
+Existing playlists with the same exact name are reused and updated. Songs must be visible in
+Light Player's transfer-page file list; unmatched or ambiguous filenames are reported and
+cause a nonzero exit status without changing any playlists. The integration uses the transfer
+API shipped with Light Player 3.2.2 and never edits its encrypted database directly, so a
+future Light Player update may require an adapter update.
+
 ## Data layout
 
 ```text

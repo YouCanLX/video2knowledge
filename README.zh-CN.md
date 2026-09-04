@@ -186,6 +186,21 @@ Light Player 可能会缓存旧导入的元数据。对于已经导入过的歌�
 删除，再重新导入更新后的 M4A；直接重复导入同一路径仍可能显示旧缓存。同时请保持 Light
 Player 的自动解析内嵌歌词功能开启。
 
+如需自动创建或更新 Light Player Playlist，请在 Light Player 中打开并保持
+**传输歌曲与歌词（Transfer Songs & Lyrics）** 页面，然后复制页面显示的 URL：
+
+```bash
+v2k sync-light-player-playlists --url http://设备地址:端口
+```
+
+命令会读取每个资料包的 metadata，按 `creator - collection` 创建 Playlist；对于没有
+metadata JSON 的迁移媒体，会回退到资料包的 creator/collection 目录层级。没有 collection
+信息的视频只加入以 creator 命名的 Playlist。同名 Playlist 会被复用并更新。歌曲必须出现在
+Light Player 传输页面的文件列表中；无法匹配或文件名存在歧义时会计数报告，并以非零状态退出。
+为避免部分更新，存在上述问题时不会修改任何 Playlist。该集成调用 Light Player 3.2.2 自带的
+传输接口，不会直接修改其加密数据库；未来 Light Player 升级后若接口发生变化，可能需要同步
+更新适配代码。
+
 ## 数据目录结构
 
 ```text

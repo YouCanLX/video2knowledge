@@ -1,5 +1,7 @@
+import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from video2knowledge import light_player
@@ -33,6 +35,26 @@ def write_pair(directory: Path, stem: str = "video") -> tuple[Path, Path]:
     m4a.write_bytes(b"synthetic-m4a-audio-payload")
     lrc.write_text("[00:01.25]First line\n[01:02.50]Second line\n", encoding="utf-8")
     return m4a, lrc
+
+
+def write_bundle_metadata(
+    library: Path,
+    stem: str,
+    creator: str,
+    collection: str = "",
+    *,
+    with_media: bool = True,
+) -> Path:
+    assets = library / stem / "assets"
+    assets.mkdir(parents=True)
+    metadata = assets / f"{stem}.metadata.json"
+    metadata.write_text(
+        json.dumps({"video": {"author": creator, "collection_title": collection}}),
+        encoding="utf-8",
+    )
+    if with_media:
+        (assets / f"{stem}.m4a").write_bytes(b"synthetic")
+    return metadata
 
 
 def test_embed_lrc_keeps_sidecar_and_replaces_only_m4a_copy(tmp_path, monkeypatch):
@@ -115,3 +137,118 @@ def test_export_light_player_reports_each_outcome(tmp_path, monkeypatch):
         failed=1,
     )
     assert unchanged.is_file()
+
+
+def test_collect_playlist_groups_combines_creator_and_collection(tmp_path):
+    write_bundle_metadata(tmp_path, "course-one", "Creator", "Course")
+    write_bundle_metadata(tmp_path, "course-two", "Creator", "Course")
+    write_bundle_metadata(tmp_path, "solo", "Creator")
+    write_bundle_metadata(tmp_path, "invalid", "")
+    write_bundle_metadata(tmp_path, "missing", "Creator", "Other", with_media=False)
+    migrated_assets = tmp_path / "Path Creator" / "Path Collection" / "legacy" / "assets"
+    migrated_assets.mkdir(parents=True)
+    (migrated_assets / "legacy.m4a").write_bytes(b"synthetic")
+    creator_only_assets = tmp_path / "Path Only" / "legacy" / "assets"
+    creator_only_assets.mkdir(parents=True)
+    (creator_only_assets / "legacy-solo.m4a").write_bytes(b"synthetic")
+
+    groups, invalid_metadata = light_player.collect_light_player_playlist_groups(tmp_path)
+
+    assert [(group.name, len(group.media_paths)) for group in groups] == [
+        ("Creator", 1),
+        ("Creator - Course", 2),
+        ("Path Creator - Path Collection", 1),
+        ("Path Only", 1),
+    ]
+    assert invalid_metadata == 1
+
+
+def test_sync_playlists_creates_missing_groups_and_updates_existing(tmp_path):
+    write_bundle_metadata(tmp_path, "course", "Creator", "Course")
+    write_bundle_metadata(tmp_path, "solo", "Creator")
+    playlists = [{"id": "solo-id", "name": "Creator"}]
+    additions: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/list":
+            directory = request.url.params.get("path", "")
+            listing = (
+                [{"type": "directory", "path": "imported", "name": "imported"}]
+                if not directory
+                else [
+                    {"type": "file", "path": "imported/course.m4a", "name": "course.m4a"},
+                    {"type": "file", "path": "imported/solo.m4a", "name": "solo.m4a"},
+                ]
+            )
+            return httpx.Response(200, json={"code": 200, "data": {"list": listing}})
+        if request.url.path == "/getPlaylist":
+            return httpx.Response(200, json={"code": 200, "data": playlists})
+        if request.url.path == "/createPlaylist":
+            body = json.loads(request.content)
+            playlists.append({"id": "course-id", "name": body["name"]})
+            return httpx.Response(200, json={"code": 200, "data": None})
+        if request.url.path == "/addToPlaylist":
+            additions.append(json.loads(request.content))
+            return httpx.Response(200, json={"code": 200, "data": None})
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    result = light_player.sync_light_player_playlists(
+        tmp_path,
+        "http://127.0.0.1:12345",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result == light_player.LightPlayerPlaylistSyncResult(
+        created=1,
+        updated=2,
+        matched_songs=2,
+    )
+    assert additions == [
+        {
+            "playlistId": "solo-id",
+            "items": [{"type": "file", "path": "imported/solo.m4a"}],
+        },
+        {
+            "playlistId": "course-id",
+            "items": [{"type": "file", "path": "imported/course.m4a"}],
+        },
+    ]
+
+
+def test_sync_playlists_makes_no_changes_when_a_song_is_unmatched(tmp_path):
+    write_bundle_metadata(tmp_path, "matched", "Creator")
+    write_bundle_metadata(tmp_path, "unmatched", "Other Creator")
+    mutation_requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/list":
+            return httpx.Response(
+                200,
+                json={
+                    "code": 200,
+                    "data": {
+                        "list": [
+                            {
+                                "type": "file",
+                                "path": "matched.m4a",
+                                "name": "matched.m4a",
+                            }
+                        ]
+                    },
+                },
+            )
+        mutation_requests.append(request.url.path)
+        return httpx.Response(200, json={"code": 200, "data": []})
+
+    result = light_player.sync_light_player_playlists(
+        tmp_path,
+        "http://127.0.0.1:12345",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.matched_songs == 1
+    assert result.unmatched_songs == 1
+    assert result.skipped == 1
+    assert result.created == 0
+    assert result.updated == 0
+    assert mutation_requests == []
