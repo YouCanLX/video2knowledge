@@ -12,7 +12,7 @@ the in-development `0.1.0` alpha version.
 
 | Type | Change | Commit |
 | --- | --- | --- |
-| Feature | Add collection-wide Markdown knowledge management with automatic Obsidian tags, a global tag tree, search, and a document–tag relationship map. | Pending |
+| Feature | Add collection-wide Markdown knowledge management with automatic Obsidian tags, a global tag tree, search, and a document–tag relationship map. | `7f16a22` |
 
 ### 2026-09-04
 
