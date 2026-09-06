@@ -1857,15 +1857,16 @@ function renderKnowledge() {
 async function loadKnowledge(writeTags = false) {
   const button = select("#reindex-knowledge");
   button.disabled = true;
-  select("#knowledge-status").textContent = writeTags ? "Analyzing Markdown and updating tags…" : "Scanning local Markdown…";
+  select("#knowledge-status").textContent = writeTags ? "Generating replacement tags with the configured LLM…" : "Scanning local Markdown…";
   try {
     knowledgeData = await requestJson(writeTags ? "/api/knowledge/reindex" : "/api/knowledge", {
       method: writeTags ? "POST" : "GET",
     });
     renderKnowledge();
     const updated = knowledgeData.summary.updated;
-    select("#knowledge-status").textContent = updated
-      ? `Updated Obsidian tags in ${updated} file(s).`
+    const failed = knowledgeData.summary.failed || 0;
+    select("#knowledge-status").textContent = writeTags
+      ? `${updated} file(s) retagged by the LLM${failed ? `; ${failed} left unchanged after errors` : ""}.`
       : `Indexed ${knowledgeData.summary.documents} Markdown file(s).`;
   } catch (error) {
     select("#knowledge-status").textContent = error.message;

@@ -1,48 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .ports import TextEnricher
+
 FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", re.DOTALL)
-TAG_TOKEN = re.compile(r"(?<![\w/])#([\w\-/\u4e00-\u9fff]+)")
 WORD_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9+._-]{2,}|[\u4e00-\u9fff]{2,8}")
-STOP_WORDS = {
-    "about",
-    "actionable",
-    "after",
-    "also",
-    "and",
-    "core",
-    "explore",
-    "from",
-    "full",
-    "further",
-    "insights",
-    "into",
-    "questions",
-    "suggestions",
-    "summary",
-    "that",
-    "the",
-    "this",
-    "timeline",
-    "transcript",
-    "video",
-    "with",
-    "your",
-    "一个",
-    "这个",
-    "我们",
-    "可以",
-    "以及",
-    "进行",
-    "内容",
-    "视频",
-    "知识",
-}
+LEGACY_TAG_LINE = re.compile(r"(?m)^Tags:(?:\s+`[^`\n]+`)+\s*\n?")
 
 
 def normalize_tag(value: str) -> str:
@@ -54,17 +23,16 @@ def normalize_tag(value: str) -> str:
 
 
 def obsidian_tags(
-    source_tags: list[str] | None = None,
+    topic_tags: list[str] | None = None,
     *,
     author: str = "",
     collection: str = "",
-    keywords: list[str] | None = None,
 ) -> list[str]:
     tags = ["video2knowledge"]
     for prefix, values in (
         ("creator", [author]),
         ("collection", [collection]),
-        ("topic", [*(source_tags or []), *(keywords or [])]),
+        ("topic", topic_tags or []),
     ):
         for value in values:
             normalized = normalize_tag(value)
@@ -127,6 +95,10 @@ def _write_tags(markdown: str, tags: list[str]) -> str:
     return "---\n" + "\n".join(output) + "\n---\n" + markdown[match.end() :]
 
 
+def _remove_legacy_tag_line(markdown: str) -> str:
+    return LEGACY_TAG_LINE.sub("", markdown, count=1)
+
+
 def _metadata_for(path: Path) -> dict[str, Any]:
     candidates = list((path.parent / "assets").glob("*.metadata.json"))
     for candidate in candidates:
@@ -135,14 +107,6 @@ def _metadata_for(path: Path) -> dict[str, Any]:
         except (OSError, ValueError):
             continue
     return {}
-
-
-def _keywords(markdown: str, title: str, limit: int = 4) -> list[str]:
-    body = FRONTMATTER.sub("", markdown, count=1)
-    headings = " ".join(re.findall(r"^#{1,3}\s+(.+)$", body, re.MULTILINE))
-    tokens = [normalize_tag(token) for token in WORD_TOKEN.findall(f"{title} {headings}")]
-    counts = Counter(token for token in tokens if token and token not in STOP_WORDS)
-    return [token for token, _ in counts.most_common(limit)]
 
 
 def _collection_for(
@@ -174,9 +138,8 @@ class KnowledgeLibrary:
     def __init__(self, root: Path):
         self.root = root
 
-    def build(self, *, write_tags: bool = False) -> dict[str, Any]:
+    def build(self) -> dict[str, Any]:
         documents: list[dict[str, Any]] = []
-        updated = 0
         for path in sorted(self.root.rglob("*.md")) if self.root.exists() else []:
             if any(
                 part.startswith(".") or part == "assets"
@@ -201,19 +164,8 @@ class KnowledgeLibrary:
             existing = fields.get("tags") or []
             if isinstance(existing, str):
                 existing = [existing]
-            inline = TAG_TOKEN.findall(FRONTMATTER.sub("", markdown, count=1))
-            generated = obsidian_tags(
-                author=author,
-                collection=collection,
-                keywords=_keywords(markdown, title),
-            )
-            tags = list(
-                dict.fromkeys(normalize_tag(tag) for tag in [*existing, *inline, *generated])
-            )
+            tags = list(dict.fromkeys(normalize_tag(tag) for tag in existing))
             tags = [tag for tag in tags if tag]
-            if write_tags and tags != list(existing):
-                path.write_text(_write_tags(markdown, tags), encoding="utf-8")
-                updated += 1
             body = FRONTMATTER.sub("", markdown, count=1)
             documents.append(
                 {
@@ -221,16 +173,65 @@ class KnowledgeLibrary:
                     "title": title,
                     "author": author,
                     "collection": collection,
+                    "language": str(fields.get("language") or metadata.get("language") or "zh-CN"),
                     "tags": tags,
                     "word_count": len(WORD_TOKEN.findall(body)),
                     "excerpt": _excerpt(markdown),
                     "headings": re.findall(r"^#{2,3}\s+(.+)$", body, re.MULTILINE)[:8],
                 }
             )
-        return self._payload(documents, updated)
+        return self._payload(documents, 0, [])
+
+    async def retag(self, tagger: TextEnricher) -> dict[str, Any]:
+        """Replace prior tags only after successful LLM classification of each document."""
+        documents = [
+            document
+            for collection in self.build()["collections"]
+            for document in collection["documents"]
+        ]
+        updated = 0
+        failures: list[dict[str, str]] = []
+        semaphore = asyncio.Semaphore(3)
+
+        async def classify(document: dict[str, Any]) -> None:
+            nonlocal updated
+            path = self.root / document["id"]
+            try:
+                markdown = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                markdown_without_legacy_tags = _remove_legacy_tag_line(markdown)
+                body = FRONTMATTER.sub("", markdown_without_legacy_tags, count=1)
+                async with semaphore:
+                    topics = await tagger.generate_tags(
+                        document["title"], body, document["language"]
+                    )
+                normalized_topics = list(
+                    dict.fromkeys(tag for topic in topics if (tag := normalize_tag(topic)))
+                )
+                if not 3 <= len(normalized_topics) <= 8:
+                    raise ValueError("The LLM must return 3-8 distinct tags")
+                tags = obsidian_tags(
+                    normalized_topics,
+                    author=document["author"],
+                    collection=document["collection"],
+                )
+                rewritten = _write_tags(markdown_without_legacy_tags, tags)
+                if rewritten != markdown:
+                    await asyncio.to_thread(path.write_text, rewritten, encoding="utf-8")
+                    updated += 1
+            except Exception as exc:  # noqa: BLE001 - preserve the original Markdown and tags
+                failures.append({"id": document["id"], "error": str(exc)})
+
+        await asyncio.gather(*(classify(document) for document in documents))
+        refreshed = self.build()
+        refreshed["summary"]["updated"] = updated
+        refreshed["summary"]["failed"] = len(failures)
+        refreshed["failures"] = failures
+        return refreshed
 
     @staticmethod
-    def _payload(documents: list[dict[str, Any]], updated: int) -> dict[str, Any]:
+    def _payload(
+        documents: list[dict[str, Any]], updated: int, failures: list[dict[str, str]]
+    ) -> dict[str, Any]:
         tag_counts = Counter(tag for document in documents for tag in document["tags"])
         grouped: dict[str, list[dict[str, Any]]] = {}
         for document in documents:
@@ -292,8 +293,10 @@ class KnowledgeLibrary:
                 "tags": len(tag_counts),
                 "words": sum(document["word_count"] for document in documents),
                 "updated": updated,
+                "failed": len(failures),
             },
             "collections": collections,
             "tag_tree": tree_list(tree),
             "graph": {"nodes": nodes, "edges": edges},
+            "failures": failures,
         }

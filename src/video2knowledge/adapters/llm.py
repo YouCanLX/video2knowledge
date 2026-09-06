@@ -16,7 +16,7 @@ from ..ports import TextEnricher
 if TYPE_CHECKING:
     from ..config import Settings
 
-ENRICHMENT_FIELDS = ("summary", "insights", "suggestions", "questions")
+ENRICHMENT_FIELDS = ("summary", "insights", "suggestions", "questions", "tags")
 MACOS_CODEX_CANDIDATES = (
     "/Applications/ChatGPT.app/Contents/Resources/codex",
     "/Applications/Codex.app/Contents/Resources/codex",
@@ -27,9 +27,28 @@ ENRICHMENT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        field: {"type": "array", "items": {"type": "string"}} for field in ENRICHMENT_FIELDS
+        **{field: {"type": "array", "items": {"type": "string"}} for field in ENRICHMENT_FIELDS},
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 8,
+        },
     },
     "required": list(ENRICHMENT_FIELDS),
+}
+TAG_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 3,
+            "maxItems": 8,
+        }
+    },
+    "required": ["tags"],
 }
 
 
@@ -41,11 +60,25 @@ The output must satisfy the supplied JSON Schema. Every field is an array of str
 - insights: further deductions, clearly distinguished from source claims
 - suggestions: actionable suggestions
 - questions: questions worth exploring
+- tags: 3-8 concise semantic topic labels; exclude author, collection, platform, and generic labels
 Write in {language}. Clearly distinguish source claims from deductions.
 Never invent facts absent from the transcript.
 Title: {title}
 
 Transcript:
+{text[:50000]}"""
+
+
+def _build_tag_prompt(title: str, text: str, language: str) -> str:
+    return f"""Classify this Markdown document for a personal knowledge library.
+Do not read files, call tools, or browse the web. Use only the supplied document.
+Return a JSON object with a single `tags` array containing 3-8 concise semantic topic labels.
+Use {language}. Do not include #, author names, collection names, platform names, or generic labels
+such as video, note, knowledge, summary, and transcript. Prefer reusable concepts over phrases
+copied from headings. Do not invent topics absent from the document.
+Title: {title}
+
+Document:
 {text[:50000]}"""
 
 
@@ -65,6 +98,21 @@ def _parse_enrichment(content: str) -> Enrichment:
             raise ValueError(f"LLM enrichment field {field} must be an array of strings")
         values[field] = field_value
     return Enrichment(**values)
+
+
+def _parse_tags(content: str) -> list[str]:
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1].rsplit("```", 1)[0]
+    data = json.loads(content)
+    tags = data.get("tags") if isinstance(data, dict) else None
+    if (
+        not isinstance(tags, list)
+        or not 3 <= len(tags) <= 8
+        or not all(isinstance(tag, str) and tag.strip() for tag in tags)
+    ):
+        raise ValueError("LLM tags must contain 3-8 non-empty strings")
+    return tags
 
 
 def _resolve_codex_executable(configured: str) -> str | None:
@@ -98,6 +146,22 @@ class OpenAICompatibleEnricher:
         response.raise_for_status()
         return _parse_enrichment(response.json()["choices"][0]["message"]["content"])
 
+    async def generate_tags(self, title: str, text: str, language: str) -> list[str]:
+        async with httpx.AsyncClient(timeout=None) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "user", "content": _build_tag_prompt(title, text, language)}
+                    ],
+                    "temperature": 0.1,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+        response.raise_for_status()
+        return _parse_tags(response.json()["choices"][0]["message"]["content"])
+
 
 class CodexCliEnricher:
     """Generate knowledge enrichment through the locally installed Codex CLI."""
@@ -113,6 +177,18 @@ class CodexCliEnricher:
         self.timeout_seconds = timeout_seconds
 
     async def enrich(self, title: str, text: str, language: str) -> Enrichment:
+        content = await self._execute(
+            _build_prompt(title, text, language), ENRICHMENT_SCHEMA, "enrichment"
+        )
+        return _parse_enrichment(content)
+
+    async def generate_tags(self, title: str, text: str, language: str) -> list[str]:
+        content = await self._execute(
+            _build_tag_prompt(title, text, language), TAG_SCHEMA, "tag generation"
+        )
+        return _parse_tags(content)
+
+    async def _execute(self, prompt: str, schema: dict, operation: str) -> str:
         executable = _resolve_codex_executable(self.executable)
         if not executable:
             raise RuntimeError(f"Codex CLI was not found: {self.executable}")
@@ -120,9 +196,7 @@ class CodexCliEnricher:
         with TemporaryDirectory(prefix="v2k-codex-") as tmp:
             workdir = Path(tmp)
             schema_path = workdir / "enrichment.schema.json"
-            schema_path.write_text(
-                json.dumps(ENRICHMENT_SCHEMA, ensure_ascii=False), encoding="utf-8"
-            )
+            schema_path.write_text(json.dumps(schema, ensure_ascii=False), encoding="utf-8")
             command = [
                 executable,
                 "exec",
@@ -148,21 +222,21 @@ class CodexCliEnricher:
             )
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(_build_prompt(title, text, language).encode()),
+                    process.communicate(prompt.encode()),
                     timeout=self.timeout_seconds,
                 )
             except TimeoutError as exc:
                 process.kill()
                 await process.communicate()
                 raise RuntimeError(
-                    f"Codex CLI enrichment exceeded {self.timeout_seconds:g} seconds"
+                    f"Codex CLI {operation} exceeded {self.timeout_seconds:g} seconds"
                 ) from exc
             if process.returncode:
                 detail = stderr.decode(errors="replace").strip()[-2000:]
                 raise RuntimeError(
-                    f"Codex CLI enrichment failed with exit code {process.returncode}: {detail}"
+                    f"Codex CLI {operation} failed with exit code {process.returncode}: {detail}"
                 )
-            return _parse_enrichment(stdout.decode())
+            return stdout.decode()
 
 
 def create_enricher(settings: Settings) -> TextEnricher:
@@ -182,3 +256,6 @@ class NoopEnricher:
         return Enrichment(
             summary=["No local LLM is configured; the full transcript was preserved."]
         )
+
+    async def generate_tags(self, title: str, text: str, language: str) -> list[str]:
+        return []

@@ -63,8 +63,9 @@ def render_lrc(
 
 def render_markdown(document: KnowledgeDocument) -> str:
     v = document.video
-    tags = " ".join(f"`{tag}`" for tag in v.tags)
-    managed_tags = obsidian_tags(v.tags, author=v.author, collection=v.collection_title)
+    managed_tags = obsidian_tags(
+        document.enrichment.tags, author=v.author, collection=v.collection_title
+    )
     video_created_at = format_video_created_at(v.published_at)
     parts = [
         "---",
@@ -93,8 +94,6 @@ def render_markdown(document: KnowledgeDocument) -> str:
         ),
         "",
     ]
-    if tags:
-        parts += [f"Tags: {tags}", ""]
     sections = [
         ("Core Summary", document.enrichment.summary, "#fff7d6", "#4a3b00", "#d9a900"),
         ("Further Insights", document.enrichment.insights, "#eaf4ff", "#173a5e", "#4b8ccb"),

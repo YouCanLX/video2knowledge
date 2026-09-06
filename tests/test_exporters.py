@@ -26,7 +26,7 @@ def document():
         "https://example.test",
         "Author",
         published_at="1735689600",
-        tags=["AI"],
+        tags=["Legacy platform tag"],
     )
     return KnowledgeDocument(
         video,
@@ -34,7 +34,7 @@ def document():
             TranscriptSegment(1.25, 3.5, "First sentence"),
             TranscriptSegment(64, 68, "Second sentence", "S1"),
         ],
-        Enrichment(summary=["Key point", "Second point"], questions=["Why?"]),
+        Enrichment(summary=["Key point", "Second point"], questions=["Why?"], tags=["AI"]),
     )
 
 
@@ -63,6 +63,8 @@ def test_render_outputs_include_timeline_and_enrichment():
     assert 'video_created_at: "2025-01-01T00:00:00+00:00"' in markdown
     assert '  - "creator/author"' in markdown
     assert '  - "topic/ai"' in markdown
+    assert "legacy-platform-tag" not in markdown
+    assert "Tags:" not in markdown
     assert "Video created: **2025-01-01T00:00:00+00:00**" in markdown
     assert "`00:00:01.250`" in markdown
     assert "[date:2025-01-01T00:00:00+00:00]" in lyrics

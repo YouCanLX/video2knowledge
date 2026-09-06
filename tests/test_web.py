@@ -149,6 +149,7 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "activateAppTab" in script.text
     assert 'id="knowledge-tab"' in page.text
     assert 'id="knowledge-graph"' in page.text
+    assert "Generate tags with LLM" in page.text
     assert 'requestJson(writeTags ? "/api/knowledge/reindex" : "/api/knowledge"' in script.text
     assert "expandedQueueDates" in script.text
     assert "data-queue-date" in script.text
@@ -158,12 +159,17 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
 
 
 def test_knowledge_api_indexes_and_tags_markdown_collections(tmp_path):
+    class FakeTagger:
+        async def generate_tags(self, title, text, language):
+            return ["Knowledge graphs", "Network science", "Visualization"]
+
     async def scenario():
         settings = Settings.load(tmp_path)
         note = settings.library_dir / "Creator" / "Collection" / "Bundle" / "note.md"
         note.parent.mkdir(parents=True)
         note.write_text("# Knowledge Graphs\n\n## Nodes\nConnected nodes.", encoding="utf-8")
         app = create_app(settings)
+        app.state.services.pipeline.enricher = FakeTagger()
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             before = await client.get("/api/knowledge")
@@ -176,7 +182,9 @@ def test_knowledge_api_indexes_and_tags_markdown_collections(tmp_path):
     assert before.json()["collections"][0]["name"] == "Collection"
     assert rebuilt.status_code == 200
     assert rebuilt.json()["summary"]["updated"] == 1
-    assert '  - "collection/collection"' in note.read_text(encoding="utf-8")
+    content = note.read_text(encoding="utf-8")
+    assert '  - "collection/collection"' in content
+    assert '  - "topic/knowledge-graphs"' in content
 
 
 def test_bilibili_image_proxy_rejects_non_bilibili_hosts(tmp_path):

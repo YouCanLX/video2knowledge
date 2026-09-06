@@ -714,9 +714,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/knowledge/reindex")
     async def reindex_knowledge_library():
         try:
-            return await asyncio.to_thread(
-                KnowledgeLibrary(settings.library_dir).build, write_tags=True
-            )
+            return await KnowledgeLibrary(settings.library_dir).retag(services.pipeline.enricher)
         except OSError as exc:
             raise HTTPException(500, f"Could not update Markdown tags: {exc}") from exc
 

@@ -64,6 +64,7 @@ class Enrichment:
     insights: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
