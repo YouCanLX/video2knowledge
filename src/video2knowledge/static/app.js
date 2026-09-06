@@ -29,8 +29,10 @@ const downloadHistoryToggle = select("#download-history-toggle");
 const downloadHistoryContent = select("#download-history-content");
 const addVideosTab = select("#add-videos-tab");
 const downloadHistoryTab = select("#download-history-tab");
+const knowledgeTab = select("#knowledge-tab");
 const addVideosPage = select("#add-videos-page");
 const downloadHistoryPage = select("#download-history-page");
+const knowledgePage = select("#knowledge-page");
 const requestProgressStack = select("#request-progress-stack");
 const preflightDialog = select("#preflight-dialog");
 const isStaticPreview = window.location.protocol === "file:";
@@ -54,6 +56,8 @@ let jobsPollingActive = false;
 let jobPollTimer = null;
 let historyPollTimer = null;
 let mlxPollTimer = null;
+let knowledgeData = null;
+let knowledgeFocus = null;
 
 function jobNeedsPolling(job) {
   return Boolean(job.session_active)
@@ -108,13 +112,18 @@ function refreshNetworkState(force = false) {
 
 function activateAppTab(name, focus = false) {
   const showHistory = name === "history";
-  addVideosTab.setAttribute("aria-selected", String(!showHistory));
+  const showKnowledge = name === "knowledge";
+  const showAdd = !showHistory && !showKnowledge;
+  addVideosTab.setAttribute("aria-selected", String(showAdd));
   downloadHistoryTab.setAttribute("aria-selected", String(showHistory));
-  addVideosTab.tabIndex = showHistory ? -1 : 0;
+  knowledgeTab.setAttribute("aria-selected", String(showKnowledge));
+  addVideosTab.tabIndex = showAdd ? 0 : -1;
   downloadHistoryTab.tabIndex = showHistory ? 0 : -1;
-  addVideosPage.hidden = showHistory;
+  knowledgeTab.tabIndex = showKnowledge ? 0 : -1;
+  addVideosPage.hidden = !showAdd;
   downloadHistoryPage.hidden = !showHistory;
-  if (focus) (showHistory ? downloadHistoryTab : addVideosTab).focus();
+  knowledgePage.hidden = !showKnowledge;
+  if (focus) ({ add: addVideosTab, history: downloadHistoryTab, knowledge: knowledgeTab }[name]).focus();
 }
 
 function requestId() {
@@ -1729,6 +1738,142 @@ function toggleLlmSettings() {
   });
 }
 
+function knowledgeDocuments() {
+  return (knowledgeData?.collections || []).flatMap((collection) => collection.documents);
+}
+
+function documentMatchesKnowledge(document, query) {
+  if (!query) return true;
+  return [document.title, document.author, document.collection, document.excerpt, ...(document.tags || [])]
+    .join(" ").toLowerCase().includes(query);
+}
+
+function renderKnowledgeStats() {
+  const summary = knowledgeData?.summary || {};
+  const values = [summary.documents || 0, summary.collections || 0, summary.tags || 0, summary.words || 0];
+  select("#knowledge-stats").querySelectorAll("strong").forEach((element, index) => {
+    element.textContent = values[index].toLocaleString();
+  });
+}
+
+function renderKnowledgeCollections() {
+  const query = select("#knowledge-query").value.trim().toLowerCase();
+  const collections = (knowledgeData?.collections || []).map((collection) => ({
+    ...collection,
+    visibleDocuments: collection.documents.filter((document) => documentMatchesKnowledge(document, query)),
+  })).filter((collection) => collection.visibleDocuments.length);
+  select("#knowledge-collections").innerHTML = collections.map((collection) => `
+    <article class="knowledge-collection ${knowledgeFocus?.type === "collection" && knowledgeFocus.value === collection.name ? "selected" : ""}">
+      <button type="button" class="knowledge-collection-summary" data-knowledge-collection="${escapeHtml(collection.name)}">
+        <span><strong>${escapeHtml(collection.name)}</strong><small>${collection.visibleDocuments.length} notes · ${collection.word_count.toLocaleString()} words</small></span>
+        <span aria-hidden="true">→</span>
+      </button>
+      <div class="knowledge-tag-row">${collection.top_tags.slice(0, 6).map((tag) => `<button type="button" data-knowledge-tag="${escapeHtml(tag)}">#${escapeHtml(tag)}</button>`).join("")}</div>
+      <div class="knowledge-document-list">
+        ${collection.visibleDocuments.map((document) => `
+          <details>
+            <summary><strong>${escapeHtml(document.title)}</strong><span>${document.word_count} words</span></summary>
+            <p>${escapeHtml(document.excerpt || "No readable preview")}</p>
+            ${(document.headings || []).length ? `<small>Sections · ${document.headings.map(escapeHtml).join(" · ")}</small>` : ""}
+          </details>
+        `).join("")}
+      </div>
+    </article>
+  `).join("") || '<div class="empty">No Markdown documents match this view</div>';
+  select("#knowledge-collections").querySelectorAll("[data-knowledge-collection]").forEach((button) => {
+    button.addEventListener("click", () => {
+      knowledgeFocus = { type: "collection", value: button.dataset.knowledgeCollection };
+      renderKnowledge();
+    });
+  });
+  select("#knowledge-collections").querySelectorAll("[data-knowledge-tag]").forEach((button) => {
+    button.addEventListener("click", () => {
+      knowledgeFocus = { type: "tag", value: button.dataset.knowledgeTag };
+      renderKnowledge();
+    });
+  });
+}
+
+function tagTreeItems(nodes) {
+  return nodes.map((node) => `
+    <li>
+      <button type="button" data-knowledge-tag="${escapeHtml(node.path)}"
+        class="${knowledgeFocus?.type === "tag" && knowledgeFocus.value === node.path ? "selected" : ""}">
+        <span>#${escapeHtml(node.name)}</span><small>${node.count}</small>
+      </button>
+      ${node.children.length ? `<ul>${tagTreeItems(node.children)}</ul>` : ""}
+    </li>
+  `).join("");
+}
+
+function renderKnowledgeTree() {
+  const tree = knowledgeData?.tag_tree || [];
+  select("#tag-tree").innerHTML = tree.length ? `<ul class="tag-tree">${tagTreeItems(tree)}</ul>` : '<div class="empty">Analyze files to build the tag tree</div>';
+  select("#tag-tree").querySelectorAll("[data-knowledge-tag]").forEach((button) => {
+    button.addEventListener("click", () => {
+      knowledgeFocus = { type: "tag", value: button.dataset.knowledgeTag };
+      renderKnowledge();
+    });
+  });
+}
+
+function renderKnowledgeGraph() {
+  const allDocuments = knowledgeDocuments();
+  let documents = allDocuments;
+  if (knowledgeFocus?.type === "collection") {
+    documents = documents.filter((document) => document.collection === knowledgeFocus.value);
+  } else if (knowledgeFocus?.type === "tag") {
+    documents = documents.filter((document) => document.tags.some((tag) => tag === knowledgeFocus.value || tag.startsWith(`${knowledgeFocus.value}/`)));
+  }
+  documents = documents.slice(0, 14);
+  const tags = [...new Set(documents.flatMap((document) => document.tags))].slice(0, 14);
+  if (!documents.length) {
+    select("#knowledge-graph").innerHTML = '<div class="empty">No relationships to visualize</div>';
+    return;
+  }
+  const height = Math.max(320, Math.max(documents.length, tags.length) * 42 + 40);
+  const y = (index, total) => 30 + index * ((height - 60) / Math.max(1, total - 1));
+  const tagY = new Map(tags.map((tag, index) => [tag, y(index, tags.length)]));
+  const documentY = new Map(documents.map((document, index) => [document.id, y(index, documents.length)]));
+  const edges = documents.flatMap((document) => document.tags.filter((tag) => tagY.has(tag)).map((tag) =>
+    `<path d="M230 ${tagY.get(tag)} C410 ${tagY.get(tag)}, 490 ${documentY.get(document.id)}, 650 ${documentY.get(document.id)}" />`,
+  )).join("");
+  select("#knowledge-graph").innerHTML = `
+    <svg viewBox="0 0 900 ${height}" role="img" aria-label="Knowledge document and tag relationship map">
+      <g class="graph-edges">${edges}</g>
+      <g class="graph-tags">${tags.map((tag) => `<g transform="translate(20 ${tagY.get(tag) - 13})"><rect width="210" height="26" rx="13"></rect><text x="12" y="18">#${escapeHtml(tag).slice(0, 28)}</text></g>`).join("")}</g>
+      <g class="graph-documents">${documents.map((document) => `<g transform="translate(650 ${documentY.get(document.id) - 15})"><rect width="230" height="30" rx="8"></rect><text x="12" y="20">${escapeHtml(document.title).slice(0, 30)}</text></g>`).join("")}</g>
+    </svg>`;
+}
+
+function renderKnowledge() {
+  renderKnowledgeStats();
+  renderKnowledgeCollections();
+  renderKnowledgeTree();
+  renderKnowledgeGraph();
+  select("#reset-knowledge-focus").disabled = !knowledgeFocus;
+}
+
+async function loadKnowledge(writeTags = false) {
+  const button = select("#reindex-knowledge");
+  button.disabled = true;
+  select("#knowledge-status").textContent = writeTags ? "Analyzing Markdown and updating tags…" : "Scanning local Markdown…";
+  try {
+    knowledgeData = await requestJson(writeTags ? "/api/knowledge/reindex" : "/api/knowledge", {
+      method: writeTags ? "POST" : "GET",
+    });
+    renderKnowledge();
+    const updated = knowledgeData.summary.updated;
+    select("#knowledge-status").textContent = updated
+      ? `Updated Obsidian tags in ${updated} file(s).`
+      : `Indexed ${knowledgeData.summary.documents} Markdown file(s).`;
+  } catch (error) {
+    select("#knowledge-status").textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function runtimeSettingsPayload() {
   return {
     library_dir: select("#library-dir").value.trim(),
@@ -1842,18 +1987,34 @@ downloadHistoryTab.addEventListener("click", () => {
   activateAppTab("history");
   if (!isStaticPreview) Promise.all([pollJobs(), pollDownloadHistory()]);
 });
-[addVideosTab, downloadHistoryTab].forEach((tab) => {
+knowledgeTab.addEventListener("click", () => {
+  activateAppTab("knowledge");
+  if (!isStaticPreview) loadKnowledge();
+});
+[addVideosTab, downloadHistoryTab, knowledgeTab].forEach((tab, index, tabs) => {
   tab.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
     event.preventDefault();
-    const target = tab === addVideosTab ? "history" : "add";
+    const offset = event.key === "ArrowRight" ? 1 : -1;
+    const targetTab = tabs[(index + offset + tabs.length) % tabs.length];
+    const target = targetTab === addVideosTab ? "add" : targetTab === downloadHistoryTab ? "history" : "knowledge";
     activateAppTab(target, true);
     if (!isStaticPreview && target === "history") {
       Promise.all([pollJobs(), pollDownloadHistory()]);
+    } else if (!isStaticPreview && target === "knowledge") {
+      loadKnowledge();
     } else if (target === "add") {
       scheduleHistoryPolling();
     }
   });
+});
+select("#knowledge-query").addEventListener("input", () => {
+  if (knowledgeData) renderKnowledgeCollections();
+});
+select("#reindex-knowledge").addEventListener("click", () => loadKnowledge(true));
+select("#reset-knowledge-focus").addEventListener("click", () => {
+  knowledgeFocus = null;
+  renderKnowledge();
 });
 downloadHistoryToggle.addEventListener("click", () => {
   const expanded = downloadHistoryToggle.getAttribute("aria-expanded") === "true";
@@ -1933,6 +2094,7 @@ if (isStaticPreview) {
   queueSummary.textContent = "Preview only";
   jobs.innerHTML = '<div class="empty">Start the local app to view the processing queue</div>';
   select("#refresh-download-history").disabled = true;
+  select("#reindex-knowledge").disabled = true;
 } else {
   loadTrackedRequests();
   renderRequestProgress(latestJobs);

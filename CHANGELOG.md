@@ -8,6 +8,12 @@ the in-development `0.1.0` alpha version.
 
 ## [0.1.0] - In development
 
+### 2026-09-07
+
+| Type | Change | Commit |
+| --- | --- | --- |
+| Feature | Add collection-wide Markdown knowledge management with automatic Obsidian tags, a global tag tree, search, and a document–tag relationship map. | Pending |
+
 ### 2026-09-04
 
 | Type | Change | Commit |

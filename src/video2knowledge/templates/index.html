@@ -28,6 +28,8 @@
           aria-controls="add-videos-page">Add Videos</button>
         <button type="button" id="download-history-tab" role="tab" aria-selected="false"
           aria-controls="download-history-page">Download History</button>
+        <button type="button" id="knowledge-tab" role="tab" aria-selected="false"
+          aria-controls="knowledge-page">Knowledge</button>
       </nav>
 
       <section class="panel tab-page" id="add-videos-page" role="tabpanel"
@@ -188,6 +190,55 @@
             <div id="jobs"><div class="empty">No jobs yet</div></div>
           </div>
         </aside>
+      </section>
+
+      <section class="tab-page knowledge-page" id="knowledge-page" role="tabpanel"
+        aria-labelledby="knowledge-tab" hidden>
+        <section class="panel knowledge-overview">
+          <div class="knowledge-heading">
+            <div>
+              <span class="eyebrow">Local Markdown intelligence</span>
+              <h2>Knowledge Collections</h2>
+              <p>Explore related notes together, with Obsidian-compatible tags and a global map.</p>
+            </div>
+            <button type="button" id="reindex-knowledge">Analyze &amp; tag files</button>
+          </div>
+          <div class="knowledge-stats" id="knowledge-stats" aria-live="polite">
+            <div><strong>—</strong><span>Documents</span></div>
+            <div><strong>—</strong><span>Collections</span></div>
+            <div><strong>—</strong><span>Tags</span></div>
+            <div><strong>—</strong><span>Words</span></div>
+          </div>
+          <div class="knowledge-toolbar">
+            <label class="sr-only" for="knowledge-query">Search knowledge</label>
+            <input id="knowledge-query" type="search"
+              placeholder="Search titles, excerpts, collections, or tags">
+            <span id="knowledge-status" role="status" aria-live="polite"></span>
+          </div>
+        </section>
+
+        <section class="knowledge-layout">
+          <section class="panel knowledge-collections-panel" aria-labelledby="knowledge-collections-title">
+            <h2 id="knowledge-collections-title">Collection analysis</h2>
+            <div id="knowledge-collections"><div class="empty">Loading knowledge library…</div></div>
+          </section>
+          <aside class="panel tag-tree-panel" aria-labelledby="tag-tree-title">
+            <h2 id="tag-tree-title">Global tag tree</h2>
+            <p class="knowledge-help">Nested tags mirror Obsidian's <code>#parent/child</code> hierarchy.</p>
+            <div id="tag-tree"><div class="empty">No tags yet</div></div>
+          </aside>
+        </section>
+
+        <section class="panel knowledge-graph-panel" aria-labelledby="knowledge-graph-title">
+          <div class="knowledge-heading compact">
+            <div>
+              <h2 id="knowledge-graph-title">Knowledge map</h2>
+              <p>Documents orbit their strongest tags. Select a collection or tag to focus the map.</p>
+            </div>
+            <button type="button" class="secondary" id="reset-knowledge-focus">Show all</button>
+          </div>
+          <div class="knowledge-graph" id="knowledge-graph"></div>
+        </section>
       </section>
 
       <section class="panel settings-panel" aria-labelledby="settings-heading">

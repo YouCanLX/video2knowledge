@@ -61,6 +61,8 @@ def test_render_outputs_include_timeline_and_enrichment():
     assert '<li style="margin:0.35em 0;padding-left:0.2em">Second point</li>' in markdown
     assert "\n- Key point\n" not in markdown
     assert 'video_created_at: "2025-01-01T00:00:00+00:00"' in markdown
+    assert '  - "creator/author"' in markdown
+    assert '  - "topic/ai"' in markdown
     assert "Video created: **2025-01-01T00:00:00+00:00**" in markdown
     assert "`00:00:01.250`" in markdown
     assert "[date:2025-01-01T00:00:00+00:00]" in lyrics
@@ -151,6 +153,7 @@ def test_bundle_uses_collection_filename_inside_unchanged_directory(tmp_path):
     outputs = write_bundle(doc, directory)
 
     assert directory.name == "Author_Test Title_BV1test"
+    assert 'collection: "Trading Course"' in outputs["markdown"].read_text(encoding="utf-8")
     assert outputs["markdown"].name == "Author_Trading Course_Test Title_BV1test.md"
     assert outputs["markdown"].parent == directory
     assert all(

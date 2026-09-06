@@ -22,6 +22,7 @@ from . import __version__
 from .adapters.bili_dl import BiliDlProvider
 from .adapters.llm import _resolve_codex_executable, create_enricher
 from .config import Settings
+from .knowledge import KnowledgeLibrary
 from .mlx_service import MlxAudioServiceManager
 from .models import JobStatus, VideoItem
 from .pipeline import PipelineJobRunner
@@ -698,6 +699,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/library")
     async def library(q: str = "", tag: str = "", charging: bool | None = None):
         return repository.list_documents(q, tag, charging)
+
+    @app.get("/api/knowledge")
+    async def knowledge_library():
+        return await asyncio.to_thread(KnowledgeLibrary(settings.library_dir).build)
+
+    @app.post("/api/knowledge/reindex")
+    async def reindex_knowledge_library():
+        try:
+            return await asyncio.to_thread(
+                KnowledgeLibrary(settings.library_dir).build, write_tags=True
+            )
+        except OSError as exc:
+            raise HTTPException(500, f"Could not update Markdown tags: {exc}") from exc
 
     @app.get("/api/settings")
     async def get_settings():

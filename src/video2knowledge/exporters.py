@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
 
+from .knowledge import obsidian_tags
 from .models import KnowledgeDocument, TranscriptSegment
 from .naming import library_filename_stem
 
@@ -63,6 +64,7 @@ def render_lrc(
 def render_markdown(document: KnowledgeDocument) -> str:
     v = document.video
     tags = " ".join(f"`{tag}`" for tag in v.tags)
+    managed_tags = obsidian_tags(v.tags, author=v.author, collection=v.collection_title)
     video_created_at = format_video_created_at(v.published_at)
     parts = [
         "---",
@@ -71,9 +73,16 @@ def render_markdown(document: KnowledgeDocument) -> str:
         f"platform: {v.platform}",
         f"source_id: {v.source_id}",
         f"author: {v.author}",
+        *(
+            [f'collection: "{v.collection_title.replace(chr(34), chr(39))}"']
+            if v.collection_title
+            else []
+        ),
         *([f'video_created_at: "{video_created_at}"'] if video_created_at else []),
         f"language: {document.language}",
         f"created_at: {document.created_at}",
+        "tags:",
+        *(f'  - "{tag}"' for tag in managed_tags),
         "---",
         "",
         f"# {v.title}",

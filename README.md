@@ -47,6 +47,10 @@ speech and an Apple Music-compatible M4A file.
 
 - ✅ Organizes the knowledge library by creator and collection while preserving collection
   context in exported documents.
+- ✅ Jointly indexes every Markdown note inside a collection, automatically adds
+  Obsidian-compatible hierarchical tags while preserving existing frontmatter, and provides a
+  searchable Knowledge view with collection summaries, a global tag tree, and a document–tag
+  relationship map.
 - ✅ Persists download history and request progress in SQLite with multi-select queue filters
   for creator, collection, status, and created date; collection choices follow the selected
   creators. Collections and individual videos are grouped under collapsible creator rows with
