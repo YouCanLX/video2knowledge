@@ -95,7 +95,9 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="preflight-continue"' in page.text
     assert 'id="download-history-list"' in page.text
     assert 'id="refresh-download-history"' in page.text
-    assert 'href="../static/app.css"' in page.text
+    assert 'href="/static/app.css?v=' in page.text
+    assert 'src="/static/app.js?v=' in page.text
+    assert "{{ static_revision }}" not in page.text
     assert 'id="preview-warning"' in page.text
     assert stylesheet.status_code == 200
     assert script.status_code == 200

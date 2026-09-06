@@ -381,6 +381,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Video2Knowledge", version=__version__, lifespan=lifespan)
     templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
+    static_revision = max(
+        (PACKAGE_DIR / "static" / name).stat().st_mtime_ns for name in ("app.css", "app.js")
+    )
     app.mount("/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="static")
     app.state.services = services
     app.state.runner = runner
@@ -388,7 +391,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
-        return templates.TemplateResponse(request=request, name="index.html")
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={"static_revision": static_revision},
+        )
 
     @app.get("/api/bilibili/image")
     async def bilibili_image(url: str = Query(min_length=1)):

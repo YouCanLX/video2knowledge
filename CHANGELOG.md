@@ -13,6 +13,7 @@ the in-development `0.1.0` alpha version.
 | Type | Change | Commit |
 | --- | --- | --- |
 | Feature | Add collection-wide Markdown knowledge management with automatic Obsidian tags, a global tag tree, search, and a document–tag relationship map. | `7f16a22` |
+| Bug fix | Version GUI static assets from their modification time so a refreshed page cannot pair the Knowledge tab with a stale, non-clickable script. | Pending |
 
 ### 2026-09-04
 
