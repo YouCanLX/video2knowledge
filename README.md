@@ -49,9 +49,11 @@ speech and an Apple Music-compatible M4A file.
   context in exported documents.
 - ✅ Jointly indexes every Markdown note inside a collection and uses the configured LLM to
   replace prior source/YAML labels with semantic, Obsidian-compatible hierarchical tags while
-  preserving other frontmatter. Per-file failures leave the original Markdown unchanged. The
-  searchable Knowledge view provides collection summaries, a global tag tree, and a document–tag
-  relationship map, with one-click filters for popular tags and every tag-tree node.
+  preserving other frontmatter. Tag generation requests 3–6 concise canonical concepts, rejects
+  color, numeric, and incomplete fragments, and conservatively merges near-duplicate topic labels
+  across the library. Per-file failures leave the original Markdown unchanged. The searchable
+  Knowledge view provides collection summaries, a global tag tree, and a document–tag relationship
+  map, with one-click filters for popular tags and every tag-tree node.
 - ✅ Persists download history and request progress in SQLite with multi-select queue filters
   for creator, collection, status, and created date; collection choices follow the selected
   creators. Collections and individual videos are grouped under collapsible creator rows with

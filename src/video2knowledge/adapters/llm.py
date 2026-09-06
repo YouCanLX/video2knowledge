@@ -32,7 +32,7 @@ ENRICHMENT_SCHEMA = {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 3,
-            "maxItems": 8,
+            "maxItems": 6,
         },
     },
     "required": list(ENRICHMENT_FIELDS),
@@ -45,7 +45,7 @@ TAG_SCHEMA = {
             "type": "array",
             "items": {"type": "string"},
             "minItems": 3,
-            "maxItems": 8,
+            "maxItems": 6,
         }
     },
     "required": ["tags"],
@@ -60,7 +60,8 @@ The output must satisfy the supplied JSON Schema. Every field is an array of str
 - insights: further deductions, clearly distinguished from source claims
 - suggestions: actionable suggestions
 - questions: questions worth exploring
-- tags: 3-8 concise semantic topic labels; exclude author, collection, platform, and generic labels
+- tags: 3-6 short, complete, reusable topic concepts; use canonical domain terms rather than
+  sentences or fragments copied from the title
 Write in {language}. Clearly distinguish source claims from deductions.
 Never invent facts absent from the transcript.
 Title: {title}
@@ -70,12 +71,13 @@ Transcript:
 
 
 def _build_tag_prompt(title: str, text: str, language: str) -> str:
-    return f"""Classify this Markdown document for a personal knowledge library.
-Do not read files, call tools, or browse the web. Use only the supplied document.
-Return a JSON object with a single `tags` array containing 3-8 concise semantic topic labels.
-Use {language}. Do not include #, author names, collection names, platform names, or generic labels
-such as video, note, knowledge, summary, and transcript. Prefer reusable concepts over phrases
-copied from headings. Do not invent topics absent from the document.
+    return f"""Create 3-6 topic tags for this Markdown document using only its content.
+Write short, complete, reusable concept names in {language}: 2-8 Chinese characters or 1-3
+English words. Prefer established domain terms and use the same canonical wording for the same
+concept across documents. Use noun phrases, not sentences, questions, claims, or truncated title
+and heading fragments. Exclude #, author, collection, platform, generic labels, IDs, standalone
+numbers, and hexadecimal color values. Do not invent absent topics.
+Return only a JSON object with one `tags` array.
 Title: {title}
 
 Document:
@@ -97,6 +99,8 @@ def _parse_enrichment(content: str) -> Enrichment:
         ):
             raise ValueError(f"LLM enrichment field {field} must be an array of strings")
         values[field] = field_value
+    if not 3 <= len(values["tags"]) <= 6:
+        raise ValueError("LLM enrichment tags must contain 3-6 strings")
     return Enrichment(**values)
 
 
@@ -108,10 +112,10 @@ def _parse_tags(content: str) -> list[str]:
     tags = data.get("tags") if isinstance(data, dict) else None
     if (
         not isinstance(tags, list)
-        or not 3 <= len(tags) <= 8
+        or not 3 <= len(tags) <= 6
         or not all(isinstance(tag, str) and tag.strip() for tag in tags)
     ):
-        raise ValueError("LLM tags must contain 3-8 non-empty strings")
+        raise ValueError("LLM tags must contain 3-6 non-empty strings")
     return tags
 
 

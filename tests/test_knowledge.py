@@ -1,6 +1,11 @@
 import asyncio
 
-from video2knowledge.knowledge import KnowledgeLibrary, normalize_tag, obsidian_tags
+from video2knowledge.knowledge import (
+    KnowledgeLibrary,
+    merge_similar_tags,
+    normalize_tag,
+    obsidian_tags,
+)
 
 
 class FakeTagger:
@@ -21,6 +26,31 @@ def test_obsidian_tags_are_structured_and_normalized():
         "topic/ai",
         "topic/machine-learning",
     ]
+
+
+def test_similar_topic_tags_merge_to_shorter_canonical_terms():
+    assert merge_similar_tags(
+        [
+            "交易入门",
+            "交易入门",
+            "交易入门方法",
+            "交易思维",
+            "交易思维差异",
+            "交易心态",
+        ]
+    ) == {
+        "交易入门方法": "交易入门",
+        "交易思维差异": "交易思维",
+    }
+
+
+def test_similar_topic_tags_keep_related_but_distinct_concepts():
+    assert (
+        merge_similar_tags(
+            ["交易策略", "交易心态", "最佳突破交易策略", "最佳交易量策略", "fair", "unfair"]
+        )
+        == {}
+    )
 
 
 def test_knowledge_library_groups_markdown_and_builds_tag_tree(tmp_path):
@@ -99,3 +129,51 @@ def test_llm_failure_keeps_original_tags_and_markdown(tmp_path):
     assert payload["summary"]["updated"] == 0
     assert payload["summary"]["failed"] == 1
     assert path.read_text(encoding="utf-8") == original
+
+
+def test_retag_merges_similar_topics_across_documents(tmp_path):
+    class SimilarTagger:
+        async def generate_tags(self, title, text, language):
+            if title == "First":
+                return ["交易入门", "风险管理", "交易心理"]
+            return ["交易入门方法", "仓位管理", "执行纪律"]
+
+    first = tmp_path / "Course" / "First.md"
+    second = tmp_path / "Course" / "Second.md"
+    first.parent.mkdir()
+    first.write_text("---\ntitle: First\n---\n# First\n\nBody", encoding="utf-8")
+    second.write_text("---\ntitle: Second\n---\n# Second\n\nBody", encoding="utf-8")
+
+    payload = asyncio.run(KnowledgeLibrary(tmp_path).retag(SimilarTagger()))
+
+    assert payload["summary"]["updated"] == 2
+    assert payload["summary"]["merged_tags"] == 1
+    assert '  - "topic/交易入门"' in first.read_text(encoding="utf-8")
+    second_content = second.read_text(encoding="utf-8")
+    assert '  - "topic/交易入门"' in second_content
+    assert "交易入门方法" not in second_content
+
+
+def test_retag_drops_color_and_numeric_artifacts(tmp_path):
+    class NoisyTagger:
+        async def generate_tags(self, title, text, language):
+            return [
+                "风险管理",
+                "交易心理",
+                "执行纪律",
+                "fff7d6",
+                "x27",
+                "交易市场的",
+            ]
+
+    path = tmp_path / "note.md"
+    path.write_text("# Note\n\nBody", encoding="utf-8")
+
+    payload = asyncio.run(KnowledgeLibrary(tmp_path).retag(NoisyTagger()))
+    content = path.read_text(encoding="utf-8")
+
+    assert payload["summary"]["updated"] == 1
+    assert payload["summary"]["failed"] == 0
+    assert "fff7d6" not in content
+    assert "x27" not in content
+    assert "交易市场的" not in content

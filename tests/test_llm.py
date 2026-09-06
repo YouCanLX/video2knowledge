@@ -6,6 +6,7 @@ import pytest
 import video2knowledge.adapters.llm as llm_module
 from video2knowledge.adapters.llm import (
     CodexCliEnricher,
+    _build_tag_prompt,
     _parse_enrichment,
     _parse_tags,
     _resolve_codex_executable,
@@ -65,8 +66,20 @@ def test_parse_tags_requires_string_array():
         "Neural networks",
         "Training",
     ]
-    with pytest.raises(ValueError, match="3-8 non-empty strings"):
+    with pytest.raises(ValueError, match="3-6 non-empty strings"):
         _parse_tags('{"tags":"invalid"}')
+    with pytest.raises(ValueError, match="3-6 non-empty strings"):
+        _parse_tags('{"tags":["a","b","c","d","e","f","g"]}')
+
+
+def test_tag_prompt_requires_concise_canonical_concepts():
+    prompt = _build_tag_prompt("交易怎么才算入门", "正文", "zh-CN")
+
+    assert "3-6 topic tags" in prompt
+    assert "2-8 Chinese characters" in prompt
+    assert "canonical wording" in prompt
+    assert "truncated title" in prompt
+    assert "hexadecimal color values" in prompt
 
 
 def test_codex_cli_falls_back_to_macos_app_bundle(tmp_path, monkeypatch):

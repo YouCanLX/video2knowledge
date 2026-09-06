@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from collections import Counter
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,27 @@ from .ports import TextEnricher
 FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", re.DOTALL)
 WORD_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9+._-]{2,}|[\u4e00-\u9fff]{2,8}")
 LEGACY_TAG_LINE = re.compile(r"(?m)^Tags:(?:\s+`[^`\n]+`)+\s*\n?")
+HEX_COLOR_TAG = re.compile(r"[0-9a-f]{6}", re.IGNORECASE)
+TAG_SIMILARITY_THRESHOLD = 0.9
+GENERIC_TAG_SUFFIXES = (
+    "介绍",
+    "入门",
+    "基础",
+    "差异",
+    "实践",
+    "应用",
+    "方法",
+    "方式",
+    "技巧",
+    "指南",
+    "概念",
+    "analysis",
+    "basics",
+    "concepts",
+    "guide",
+    "methods",
+    "practice",
+)
 
 
 def normalize_tag(value: str) -> str:
@@ -39,6 +61,50 @@ def obsidian_tags(
             if normalized:
                 tags.append(f"{prefix}/{normalized}")
     return list(dict.fromkeys(tags))
+
+
+def _tag_fingerprint(tag: str) -> str:
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", tag).casefold().replace("的", "")
+
+
+def _useful_topic_tag(tag: str) -> bool:
+    return (
+        not HEX_COLOR_TAG.fullmatch(tag)
+        and tag != "x27"
+        and not tag.isdecimal()
+        and not tag.startswith(("的", "和", "与", "或"))
+        and not tag.endswith(("的", "和", "与", "或"))
+    )
+
+
+def _similar_tags(left: str, right: str) -> bool:
+    left_key, right_key = _tag_fingerprint(left), _tag_fingerprint(right)
+    if left_key == right_key:
+        return True
+    shorter, longer = sorted((left_key, right_key), key=len)
+    if len(shorter) < 4:
+        return False
+    if longer.startswith(shorter) and longer.removeprefix(shorter) in GENERIC_TAG_SUFFIXES:
+        return True
+    return (
+        left_key[0] == right_key[0]
+        and SequenceMatcher(None, left_key, right_key).ratio() >= TAG_SIMILARITY_THRESHOLD
+    )
+
+
+def merge_similar_tags(tags: list[str]) -> dict[str, str]:
+    """Map near-duplicate topic tags to a concise canonical spelling."""
+    counts = Counter(tags)
+    ordered = sorted(counts, key=lambda tag: (len(_tag_fingerprint(tag)), -counts[tag], tag))
+    canonical: list[str] = []
+    aliases: dict[str, str] = {}
+    for tag in ordered:
+        match = next((candidate for candidate in canonical if _similar_tags(tag, candidate)), None)
+        if match is None:
+            canonical.append(tag)
+        elif tag != match:
+            aliases[tag] = match
+    return aliases
 
 
 def _frontmatter_values(markdown: str) -> dict[str, Any]:
@@ -191,12 +257,12 @@ class KnowledgeLibrary:
         ]
         updated = 0
         failures: list[dict[str, str]] = []
+        generated: dict[str, list[str]] = {}
         semaphore = asyncio.Semaphore(3)
 
         async def classify(document: dict[str, Any]) -> None:
-            nonlocal updated
-            path = self.root / document["id"]
             try:
+                path = self.root / document["id"]
                 markdown = await asyncio.to_thread(path.read_text, encoding="utf-8")
                 markdown_without_legacy_tags = _remove_legacy_tag_line(markdown)
                 body = FRONTMATTER.sub("", markdown_without_legacy_tags, count=1)
@@ -205,12 +271,33 @@ class KnowledgeLibrary:
                         document["title"], body, document["language"]
                     )
                 normalized_topics = list(
-                    dict.fromkeys(tag for topic in topics if (tag := normalize_tag(topic)))
+                    dict.fromkeys(
+                        tag
+                        for topic in topics
+                        if (tag := normalize_tag(topic)) and _useful_topic_tag(tag)
+                    )
                 )
-                if not 3 <= len(normalized_topics) <= 8:
-                    raise ValueError("The LLM must return 3-8 distinct tags")
+                if not 3 <= len(normalized_topics) <= 6:
+                    raise ValueError("The LLM must return 3-6 distinct tags")
+                generated[document["id"]] = normalized_topics
+            except Exception as exc:  # noqa: BLE001 - preserve the original Markdown and tags
+                failures.append({"id": document["id"], "error": str(exc)})
+
+        await asyncio.gather(*(classify(document) for document in documents))
+        aliases = merge_similar_tags([tag for topics in generated.values() for tag in topics])
+        for document in documents:
+            topics = generated.get(document["id"])
+            if topics is None:
+                continue
+            path = self.root / document["id"]
+            try:
+                markdown = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                markdown_without_legacy_tags = _remove_legacy_tag_line(markdown)
+                merged_topics = list(dict.fromkeys(aliases.get(tag, tag) for tag in topics))
+                if len(merged_topics) < 3:
+                    raise ValueError("Similar-tag merging left fewer than 3 distinct tags")
                 tags = obsidian_tags(
-                    normalized_topics,
+                    merged_topics,
                     author=document["author"],
                     collection=document["collection"],
                 )
@@ -220,10 +307,9 @@ class KnowledgeLibrary:
                     updated += 1
             except Exception as exc:  # noqa: BLE001 - preserve the original Markdown and tags
                 failures.append({"id": document["id"], "error": str(exc)})
-
-        await asyncio.gather(*(classify(document) for document in documents))
         refreshed = self.build()
         refreshed["summary"]["updated"] = updated
+        refreshed["summary"]["merged_tags"] = len(aliases)
         refreshed["summary"]["failed"] = len(failures)
         refreshed["failures"] = failures
         return refreshed
