@@ -1742,10 +1742,30 @@ function knowledgeDocuments() {
   return (knowledgeData?.collections || []).flatMap((collection) => collection.documents);
 }
 
-function documentMatchesKnowledge(document, query) {
-  if (!query) return true;
-  return [document.title, document.author, document.collection, document.excerpt, ...(document.tags || [])]
+function documentHasKnowledgeTag(document, tagPath) {
+  if (!tagPath) return true;
+  return (document.tags || []).some((tag) => tag === tagPath || tag.startsWith(`${tagPath}/`));
+}
+
+function documentMatchesKnowledge(document, query, tagPath = "") {
+  const matchesQuery = !query || [document.title, document.author, document.collection, document.excerpt, ...(document.tags || [])]
     .join(" ").toLowerCase().includes(query);
+  return matchesQuery && documentHasKnowledgeTag(document, tagPath);
+}
+
+function activeKnowledgeTag() {
+  return knowledgeFocus?.type === "tag" ? knowledgeFocus.value : "";
+}
+
+function filteredKnowledgeDocuments() {
+  const query = select("#knowledge-query").value.trim().toLowerCase();
+  const tagPath = activeKnowledgeTag();
+  return knowledgeDocuments().filter((document) => documentMatchesKnowledge(document, query, tagPath));
+}
+
+function setKnowledgeTagFilter(tagPath) {
+  knowledgeFocus = activeKnowledgeTag() === tagPath ? null : { type: "tag", value: tagPath };
+  renderKnowledge();
 }
 
 function renderKnowledgeStats() {
@@ -1758,9 +1778,10 @@ function renderKnowledgeStats() {
 
 function renderKnowledgeCollections() {
   const query = select("#knowledge-query").value.trim().toLowerCase();
+  const tagPath = activeKnowledgeTag();
   const collections = (knowledgeData?.collections || []).map((collection) => ({
     ...collection,
-    visibleDocuments: collection.documents.filter((document) => documentMatchesKnowledge(document, query)),
+    visibleDocuments: collection.documents.filter((document) => documentMatchesKnowledge(document, query, tagPath)),
   })).filter((collection) => collection.visibleDocuments.length);
   select("#knowledge-collections").innerHTML = collections.map((collection) => `
     <article class="knowledge-collection ${knowledgeFocus?.type === "collection" && knowledgeFocus.value === collection.name ? "selected" : ""}">
@@ -1787,11 +1808,31 @@ function renderKnowledgeCollections() {
     });
   });
   select("#knowledge-collections").querySelectorAll("[data-knowledge-tag]").forEach((button) => {
-    button.addEventListener("click", () => {
-      knowledgeFocus = { type: "tag", value: button.dataset.knowledgeTag };
-      renderKnowledge();
-    });
+    button.addEventListener("click", () => setKnowledgeTagFilter(button.dataset.knowledgeTag));
   });
+}
+
+function renderKnowledgeFilters() {
+  const tagNodes = (knowledgeData?.graph?.nodes || []).filter((node) => node.kind === "tag");
+  const ordered = [
+    ...tagNodes.filter((node) => node.label.startsWith("topic/")),
+    ...tagNodes.filter((node) => !node.label.startsWith("topic/") && node.label !== "video2knowledge"),
+  ].slice(0, 10);
+  const active = activeKnowledgeTag();
+  select("#knowledge-tag-filters").innerHTML = ordered.map((node) => `
+    <button type="button" data-quick-knowledge-tag="${escapeHtml(node.label)}"
+      class="${active === node.label ? "active" : ""}" aria-pressed="${active === node.label}">
+      #${escapeHtml(node.label)} · ${node.count}
+    </button>
+  `).join("") || '<span class="empty compact">No tags available</span>';
+  select("#knowledge-tag-filters").querySelectorAll("[data-quick-knowledge-tag]").forEach((button) => {
+    button.addEventListener("click", () => setKnowledgeTagFilter(button.dataset.quickKnowledgeTag));
+  });
+  const clear = select("#clear-knowledge-tag");
+  clear.hidden = !active;
+  select("#knowledge-filter-summary").textContent = active
+    ? `${filteredKnowledgeDocuments().length} note(s) match #${active}`
+    : `${filteredKnowledgeDocuments().length} note(s) shown`;
 }
 
 function tagTreeItems(nodes) {
@@ -1810,15 +1851,12 @@ function renderKnowledgeTree() {
   const tree = knowledgeData?.tag_tree || [];
   select("#tag-tree").innerHTML = tree.length ? `<ul class="tag-tree">${tagTreeItems(tree)}</ul>` : '<div class="empty">Analyze files to build the tag tree</div>';
   select("#tag-tree").querySelectorAll("[data-knowledge-tag]").forEach((button) => {
-    button.addEventListener("click", () => {
-      knowledgeFocus = { type: "tag", value: button.dataset.knowledgeTag };
-      renderKnowledge();
-    });
+    button.addEventListener("click", () => setKnowledgeTagFilter(button.dataset.knowledgeTag));
   });
 }
 
 function renderKnowledgeGraph() {
-  const allDocuments = knowledgeDocuments();
+  const allDocuments = filteredKnowledgeDocuments();
   let documents = allDocuments;
   if (knowledgeFocus?.type === "collection") {
     documents = documents.filter((document) => document.collection === knowledgeFocus.value);
@@ -1848,6 +1886,7 @@ function renderKnowledgeGraph() {
 
 function renderKnowledge() {
   renderKnowledgeStats();
+  renderKnowledgeFilters();
   renderKnowledgeCollections();
   renderKnowledgeTree();
   renderKnowledgeGraph();
@@ -2010,7 +2049,11 @@ knowledgeTab.addEventListener("click", () => {
   });
 });
 select("#knowledge-query").addEventListener("input", () => {
-  if (knowledgeData) renderKnowledgeCollections();
+  if (knowledgeData) renderKnowledge();
+});
+select("#clear-knowledge-tag").addEventListener("click", () => {
+  knowledgeFocus = null;
+  renderKnowledge();
 });
 select("#reindex-knowledge").addEventListener("click", () => loadKnowledge(true));
 select("#reset-knowledge-focus").addEventListener("click", () => {

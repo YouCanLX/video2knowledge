@@ -149,7 +149,12 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "activateAppTab" in script.text
     assert 'id="knowledge-tab"' in page.text
     assert 'id="knowledge-graph"' in page.text
+    assert 'id="knowledge-tag-filters"' in page.text
+    assert 'id="clear-knowledge-tag"' in page.text
     assert "Generate tags with LLM" in page.text
+    assert "documentHasKnowledgeTag" in script.text
+    assert "filteredKnowledgeDocuments" in script.text
+    assert "data-quick-knowledge-tag" in script.text
     assert 'requestJson(writeTags ? "/api/knowledge/reindex" : "/api/knowledge"' in script.text
     assert "expandedQueueDates" in script.text
     assert "data-queue-date" in script.text
