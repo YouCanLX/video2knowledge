@@ -18,7 +18,7 @@ the in-development `0.1.0` alpha version.
 | Feature | Filter collection notes instantly from popular tag chips or any global tag-tree node, including hierarchical child-tag matches and one-click clearing. | `7a243f9` |
 | Improvement | Generate shorter canonical topic labels, reject malformed tag artifacts, and merge conservative near-duplicate tags across Markdown notes. | `524ea6d` |
 | Feature | Collapse Knowledge collection cards and select multiple collections for scoped LLM tag generation. | `740a806` |
-| Feature | Generate an expandable LLM knowledge graph from the 100 most frequent topic tags and synchronize its hierarchy into linked Markdown notes. | Pending |
+| Feature | Generate an expandable LLM knowledge graph from the 100 most frequent topic tags and synchronize its hierarchy into linked Markdown notes. | `84bcd3d` |
 
 ### 2026-09-04
 
