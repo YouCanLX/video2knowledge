@@ -40,6 +40,8 @@ speech and an Apple Music-compatible M4A file.
 - ✅ Keeps the editable Markdown note at the video-bundle root and places source audio,
   synchronized LRC, and machine-readable JSON timelines together under `assets/`.
 - ✅ Converts Markdown to speech and optionally packages it as AAC/M4A for Apple Music.
+- ✅ Configures TTS model, voice, speed, and timeout plus M4A bitrate, sample rate, channels,
+  and embedded lyrics through Runtime Settings or JSON, with temporary `speak` overrides.
 - ✅ Updates bundle M4A files for Light Player by embedding the complete timestamped LRC text
   as lyrics without re-encoding audio, while retaining the LRC and JSON sidecars.
 
@@ -85,7 +87,7 @@ or DRM. Download and retain only content you are permitted to use.
 
 - [ ] Support multi-speaker interview transcription, speaker identification, and viewpoint
   extraction.
-- [ ] Expand speech synthesis and media export configuration.
+- [x] Expand speech synthesis and media export configuration.
 
 ### Knowledge and task management
 
@@ -214,7 +216,21 @@ Convert Markdown into synchronized speech:
 v2k speak notes.md --title "Knowledge Audio" --author "Author"
 ```
 
-Apple Music imports the generated M4A with plain embedded lyrics. Precise synchronization
+Configure synthesis and M4A defaults in **Runtime Settings → Speech synthesis and media
+export** or `config.json`. Override them for one command without changing saved settings:
+
+```bash
+v2k speak notes.md --voice Vivian --speed 1.2 --audio-bitrate-kbps 128 --sample-rate 24000 --channels 1 --lyrics-mode synced
+v2k speak notes.md --no-apple-music
+```
+
+`--apple-music` / `--no-apple-music` override the saved M4A default. WAV, LRC, and JSON
+outputs are always retained. M4A options apply to `speak`; video processing uses the TTS
+settings when synthesis is requested. Existing completed jobs still reuse cached outputs;
+use `--force-refresh` to regenerate them with changed synthesis settings. Speed support
+depends on the MLX model. See [configuration details](docs/configuration.md#speech-synthesis-and-media-export).
+
+By default, Apple Music imports the generated M4A with plain embedded lyrics. Precise synchronization
 remains in the same-name LRC and JSON files because Apple Music has no stable public format
 for importing synchronized lyrics.
 

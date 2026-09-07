@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .adapters.bili_dl import BiliDlProvider
 from .adapters.llm import _resolve_codex_executable, create_enricher
-from .config import Settings
+from .config import Settings, SpeechMediaOptions
 from .knowledge import KnowledgeLibrary
 from .mlx_service import MlxAudioServiceManager
 from .models import JobStatus, VideoItem
@@ -81,7 +81,7 @@ class KnowledgeRetagRequest(BaseModel):
     collections: list[str] = Field(min_length=1, max_length=500)
 
 
-class RuntimeSettingsRequest(BaseModel):
+class RuntimeSettingsRequest(SpeechMediaOptions):
     library_dir: str = Field(min_length=1)
     mlx_base_url: str = Field(min_length=1)
     mlx_audio_command: str = Field(min_length=1)
@@ -100,8 +100,9 @@ def _runtime_path_value(path: Path, data_dir: Path) -> str:
         return str(path.resolve())
 
 
-def _settings_payload(settings: Settings) -> dict[str, str | float]:
+def _settings_payload(settings: Settings) -> dict[str, object]:
     return {
+        **settings.speech_media_options().model_dump(),
         "library_dir": _runtime_path_value(settings.library_dir, settings.data_dir),
         "mlx_base_url": settings.mlx_base_url,
         "mlx_audio_command": settings.mlx_audio_command,
@@ -765,12 +766,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.codex_timeout_seconds = body.codex_timeout_seconds
         settings.llm_base_url = body.llm_base_url.rstrip("/")
         settings.llm_model = body.llm_model.strip()
+        for name in SpeechMediaOptions.model_fields:
+            if name in body.model_fields_set:
+                setattr(settings, name, getattr(body, name))
         settings.ensure_dirs()
         settings.save()
 
         services.pipeline.library_dir = settings.library_dir
         services.pipeline.enricher = create_enricher(settings)
         services.audio.base_url = settings.mlx_base_url
+        services.audio.tts_model = settings.mlx_tts_model
+        services.audio.voice = settings.mlx_tts_voice
+        services.audio.speed = settings.mlx_tts_speed
+        services.audio.timeout_seconds = settings.mlx_tts_timeout_seconds
         if isinstance(provider, BiliDlProvider):
             provider.set_download_dir(settings.library_dir / ".staging")
         mlx_manager.configure(settings.mlx_audio_command, settings.mlx_base_url)

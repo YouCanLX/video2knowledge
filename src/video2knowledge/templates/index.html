@@ -331,6 +331,40 @@
           </fieldset>
 
           <fieldset>
+            <legend>Speech synthesis and media export</legend>
+            <p>M4A settings apply to the speak command. WAV and synchronized sidecars are always retained.</p>
+            <div class="settings-grid">
+              <label>TTS model
+                <input id="mlx_tts_model" type="text" required>
+              </label>
+              <label>TTS voice
+                <input id="mlx_tts_voice" type="text" required>
+              </label>
+              <label>TTS speed
+                <input id="mlx_tts_speed" type="number" min="0.25" max="4" step="0.05" required>
+              </label>
+              <label>TTS request timeout (seconds; blank = unlimited)
+                <input id="mlx_tts_timeout_seconds" type="number" min="0.001" step="any">
+              </label>
+              <label>Export M4A by default for speak
+                <input id="apple_music_enabled" type="checkbox" >
+              </label>
+              <label>AAC bitrate (kbps)
+                <input id="media_audio_bitrate_kbps" type="number" min="32" max="320" required>
+              </label>
+              <label>M4A sample rate
+                <select id="media_sample_rate"><option value="">Keep source</option><option value="8000">8000</option><option value="16000">16000</option><option value="22050">22050</option><option value="24000">24000</option><option value="32000">32000</option><option value="44100">44100</option><option value="48000">48000</option></select>
+              </label>
+              <label>M4A channels
+                <select id="media_channels"><option value="">Keep source</option><option value="1">Mono</option><option value="2">Stereo</option></select>
+              </label>
+              <label>M4A embedded lyrics
+                <select id="media_lyrics_mode"><option value="plain">Plain (Apple Music)</option><option value="synced">Timestamped (Light Player)</option><option value="none">None</option></select>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
             <legend>MLX Audio service</legend>
             <div class="settings-grid">
               <label>

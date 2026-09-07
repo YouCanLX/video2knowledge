@@ -85,7 +85,10 @@ class MlxAudioClient:
         stt_model: str = "mlx-community/whisper-large-v3-turbo-asr-fp16",
         tts_model: str = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit",
         voice: str = "Vivian",
+        speed: float = 1.0,
+        timeout_seconds: float | None = None,
     ):
+        self.speed, self.timeout_seconds = speed, timeout_seconds
         self.base_url = base_url.rstrip("/")
         self.stt_model, self.tts_model, self.voice = stt_model, tts_model, voice
 
@@ -127,9 +130,10 @@ class MlxAudioClient:
                             "model": self.tts_model,
                             "input": segment.text,
                             "voice": self.voice,
+                            "speed": self.speed,
                             "response_format": "wav",
                         },
-                        timeout=None,
+                        timeout=self.timeout_seconds,
                     )
                 except httpx.ConnectError as exc:
                     raise RuntimeError(self._connection_error_message()) from exc
@@ -197,7 +201,7 @@ def _concat_wav(parts: list[Path], output: Path) -> None:
         frames = [first.readframes(first.getnframes())]
     for part in parts[1:]:
         with wave.open(str(part), "rb") as current:
-            if current.getparams()[:4] != params[:4]:
+            if current.getparams()[:3] != params[:3]:
                 raise ValueError("MLX Audio returned inconsistent WAV parameters")
             frames.append(current.readframes(current.getnframes()))
     with wave.open(str(output), "wb") as target:

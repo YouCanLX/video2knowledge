@@ -25,6 +25,7 @@ class ApplicationServices:
 
 def build_services(settings: Settings) -> ApplicationServices:
     """Build the configured adapters and application pipeline."""
+    options = settings.speech_media_options()
     settings.ensure_dirs()
     provider: VideoProvider = (
         BiliDlProvider(settings.bili_dl_dir, settings.cookie_file)
@@ -37,7 +38,9 @@ def build_services(settings: Settings) -> ApplicationServices:
         base_url=settings.mlx_base_url,
         stt_model=settings.mlx_stt_model,
         tts_model=settings.mlx_tts_model,
-        voice=settings.mlx_tts_voice,
+        voice=options.mlx_tts_voice,
+        speed=options.mlx_tts_speed,
+        timeout_seconds=options.mlx_tts_timeout_seconds,
     )
     repository = LibraryRepository(settings.database_path)
     migrate_legacy_bundles(settings, repository)

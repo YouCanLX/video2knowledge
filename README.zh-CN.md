@@ -28,6 +28,7 @@ Video2Knowledge 是一套本地优先的处理流程，可将哔哩哔哩视频�
 
 - ✅ 将可编辑 Markdown 笔记保留在视频资料包根目录，并把源音频、同步歌词 LRC 和机器可读的 JSON 时间轴统一放入 `assets/`。
 - ✅ 将 Markdown 转换为语音，并可选封装为适用于 Apple Music 的 AAC/M4A 文件。
+- ✅ 通过运行时设置或 JSON 配置语音模型、音色、语速、超时，以及 M4A 码率、采样率、声道和内嵌歌词，并支持 `speak` 命令临时覆盖。
 - ✅ 为 Light Player 更新资料包中的 M4A：把完整的带时间戳 LRC 文本写入歌词元数据，
   不重新编码音频，同时保留 LRC 和 JSON 边车文件。
 
@@ -64,7 +65,7 @@ Video2Knowledge 不会绕过平台授权、充电内容的访问控制或 DRM。
 ### 语音与媒体
 
 - [ ] 支持多人访谈类语音的转录、说话者识别与观点提取。
-- [ ] 扩展语音合成与媒体导出的配置能力。
+- [x] 扩展语音合成与媒体导出的配置能力。
 
 ### 知识与任务管理
 
@@ -175,7 +176,20 @@ v2k process "https://www.bilibili.com/video/BV..." --force-refresh
 v2k speak notes.md --title "知识音频" --author "作者"
 ```
 
-Apple Music 会导入带有普通内嵌歌词的 M4A 文件。由于 Apple Music 没有稳定公开的同步歌词导入格式，精确的时间同步信息会保存在同名的 LRC 和 JSON 文件中。
+在 **Runtime Settings → Speech synthesis and media export（语音合成与媒体导出）** 或
+`config.json` 中设置默认值，也可以仅对本次命令覆盖参数，不修改保存的配置：
+
+```bash
+v2k speak notes.md --voice Vivian --speed 1.2 --audio-bitrate-kbps 128 --sample-rate 24000 --channels 1 --lyrics-mode synced
+v2k speak notes.md --no-apple-music
+```
+
+`--apple-music` / `--no-apple-music` 可覆盖保存的 M4A 导出开关。WAV、LRC 和 JSON 始终保留。
+M4A 参数用于 `speak`；视频处理在请求语音合成时使用同一组语音设置。已完成的任务仍会复用缓存产物，
+需要应用新语音参数时使用 `--force-refresh` 重新生成。语速支持取决于 MLX 模型。
+详见[配置说明](docs/configuration.md#speech-synthesis-and-media-export)。
+
+默认情况下，Apple Music 会导入带有普通内嵌歌词的 M4A 文件。由于 Apple Music 没有稳定公开的同步歌词导入格式，精确的时间同步信息会保存在同名的 LRC 和 JSON 文件中。
 
 为 Light Player 准备或更新所有视频资料包：
 

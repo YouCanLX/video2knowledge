@@ -60,3 +60,44 @@ def test_settings_reject_non_object_configuration(tmp_path):
     (tmp_path / "config.json").write_text("[]", encoding="utf-8")
     with pytest.raises(ValueError, match="JSON object"):
         Settings.load(tmp_path)
+
+
+def test_speech_media_options_round_trip(tmp_path):
+    settings = Settings.load(tmp_path)
+    assert settings.mlx_tts_speed == 1
+    assert settings.mlx_tts_timeout_seconds is None
+    assert settings.apple_music_enabled is True
+    settings.mlx_tts_voice = "SyntheticVoice"
+    settings.mlx_tts_speed = 1.5
+    settings.mlx_tts_timeout_seconds = 120
+    settings.apple_music_enabled = False
+    settings.media_audio_bitrate_kbps = 128
+    settings.media_sample_rate = 24000
+    settings.media_channels = 1
+    settings.media_lyrics_mode = "synced"
+    settings.save()
+    assert Settings.load(tmp_path).speech_media_options() == settings.speech_media_options()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("mlx_tts_voice", "  "),
+        ("mlx_tts_model", ""),
+        ("mlx_tts_speed", 0),
+        ("mlx_tts_speed", 5),
+        ("mlx_tts_speed", float("nan")),
+        ("mlx_tts_timeout_seconds", -1),
+        ("mlx_tts_timeout_seconds", float("inf")),
+        ("apple_music_enabled", "false"),
+        ("media_audio_bitrate_kbps", 0),
+        ("media_audio_bitrate_kbps", 128.5),
+        ("media_sample_rate", 12345),
+        ("media_channels", 3),
+        ("media_lyrics_mode", "invalid"),
+    ],
+)
+def test_invalid_speech_media_config_is_rejected(tmp_path, field, value):
+    (tmp_path / "config.json").write_text(json.dumps({field: value}), encoding="utf-8")
+    with pytest.raises(ValueError, match=field):
+        Settings.load(tmp_path)

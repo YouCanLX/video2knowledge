@@ -2142,6 +2142,16 @@ function runtimeSettingsPayload() {
     library_dir: select("#library-dir").value.trim(),
     mlx_base_url: select("#mlx-base-url").value.trim(),
     mlx_audio_command: select("#mlx-command").value.trim(),
+    mlx_tts_model: select("#mlx_tts_model").value.trim(),
+    mlx_tts_voice: select("#mlx_tts_voice").value.trim(),
+    mlx_tts_speed: Number(select("#mlx_tts_speed").value),
+    mlx_tts_timeout_seconds: select("#mlx_tts_timeout_seconds").value === "" ? null : Number(select("#mlx_tts_timeout_seconds").value),
+    apple_music_enabled: select("#apple_music_enabled").checked,
+    media_audio_bitrate_kbps: Number(select("#media_audio_bitrate_kbps").value),
+    media_sample_rate: select("#media_sample_rate").value === "" ? null : Number(select("#media_sample_rate").value),
+    media_channels: select("#media_channels").value === "" ? null : Number(select("#media_channels").value),
+    media_lyrics_mode: select("#media_lyrics_mode").value.trim(),
+
     llm_backend: select("#llm-backend").value,
     codex_cli_path: select("#codex-cli-path").value.trim(),
     codex_model: select("#codex-model").value.trim(),
@@ -2167,6 +2177,16 @@ async function loadSettings() {
     select("#library-dir").value = data.library_dir;
     select("#mlx-base-url").value = data.mlx_base_url;
     select("#mlx-command").value = data.mlx_audio_command;
+    select("#mlx_tts_model").value = data.mlx_tts_model ?? "";
+    select("#mlx_tts_voice").value = data.mlx_tts_voice ?? "";
+    select("#mlx_tts_speed").value = data.mlx_tts_speed ?? "";
+    select("#mlx_tts_timeout_seconds").value = data.mlx_tts_timeout_seconds ?? "";
+    select("#apple_music_enabled").checked = data.apple_music_enabled;
+    select("#media_audio_bitrate_kbps").value = data.media_audio_bitrate_kbps ?? "";
+    select("#media_sample_rate").value = data.media_sample_rate ?? "";
+    select("#media_channels").value = data.media_channels ?? "";
+    select("#media_lyrics_mode").value = data.media_lyrics_mode ?? "";
+
     select("#llm-backend").value = data.llm_backend;
     select("#codex-cli-path").value = data.codex_cli_path;
     select("#codex-model").value = data.codex_model;

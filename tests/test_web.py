@@ -1013,3 +1013,46 @@ def test_completed_job_output_can_be_opened_or_revealed(tmp_path, monkeypatch):
     assert revealed.status_code == 200
     assert missing.status_code == 404
     assert actions == [(output, False), (output, True)]
+
+
+def test_runtime_speech_media_settings_validate_and_update_adapter(tmp_path, monkeypatch):
+    services = web_module.build_services(Settings.load(tmp_path))
+    monkeypatch.setattr(web_module, "build_services", lambda _: services)
+
+    async def scenario():
+        app = create_app(Settings.load(tmp_path))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            payload = (await client.get("/api/settings")).json()
+            payload.update(
+                mlx_tts_voice="SyntheticVoice",
+                mlx_tts_model="synthetic-model",
+                mlx_tts_speed=1.5,
+                mlx_tts_timeout_seconds=45,
+                apple_music_enabled=False,
+                media_audio_bitrate_kbps=128,
+                media_sample_rate=24000,
+                media_channels=1,
+                media_lyrics_mode="synced",
+            )
+            response = await client.put("/api/settings", json=payload)
+            assert response.status_code == 200
+            assert response.json() == payload
+            assert services.audio.voice == "SyntheticVoice"
+            assert services.audio.tts_model == "synthetic-model"
+            assert services.audio.speed == 1.5
+            assert services.audio.timeout_seconds == 45
+            assert services.pipeline.tts is services.audio
+            assert Settings.load(tmp_path).media_lyrics_mode == "synced"
+            invalid = await client.put("/api/settings", json={**payload, "mlx_tts_speed": 0})
+            assert invalid.status_code == 422
+            assert Settings.load(tmp_path).mlx_tts_speed == 1.5
+            # Older clients do not reset fields they omit.
+            minimal = {
+                key: payload[key] for key in ("library_dir", "mlx_base_url", "mlx_audio_command")
+            }
+            response = await client.put("/api/settings", json=minimal)
+            assert response.json()["media_lyrics_mode"] == "synced"
+
+    asyncio.run(scenario())

@@ -75,3 +75,45 @@ def test_mlx_client_uses_timestamp_normalization(tmp_path, monkeypatch):
     assert [(segment.start, segment.end, segment.text) for segment in segments] == [
         (4, 7, "Recovered segment")
     ]
+
+
+def test_synthesis_options_and_variable_duration_timing(tmp_path, monkeypatch):
+    import io
+    import wave
+
+    from video2knowledge.models import TranscriptSegment
+
+    requests = []
+
+    def post(url, *, json, timeout):
+        requests.append((url, json, timeout))
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as audio:
+            audio.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+            audio.writeframes(b"\0\0" * (8000 * len(requests)))
+
+        class Response:
+            content = buffer.getvalue()
+
+            def raise_for_status(self):
+                pass
+
+        return Response()
+
+    monkeypatch.setattr(mlx_audio_module.httpx, "post", post)
+    client = MlxAudioClient(
+        tts_model="synthetic-model", voice="SyntheticVoice", speed=1.5, timeout_seconds=30
+    )
+    segments = [TranscriptSegment(0, 0, "First"), TranscriptSegment(0, 0, "Second")]
+    output = client.synthesize(segments, tmp_path / "speech.wav", "en")
+    assert requests[0][1] == {
+        "model": "synthetic-model",
+        "input": "First",
+        "voice": "SyntheticVoice",
+        "speed": 1.5,
+        "response_format": "wav",
+    }
+    assert all(timeout == 30 for _, _, timeout in requests)
+    assert [(s.start, s.end) for s in segments] == [(0, 1), (1, 3)]
+    with wave.open(str(output), "rb") as audio:
+        assert audio.getnframes() == 24000

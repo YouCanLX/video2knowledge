@@ -13,5 +13,12 @@
   "llm_model": "qwen3:8b",
   "codex_cli_path": "codex",
   "codex_model": "",
-  "codex_timeout_seconds": 900
+  "codex_timeout_seconds": 900,
+  "mlx_tts_speed": 1.0,
+  "mlx_tts_timeout_seconds": null,
+  "apple_music_enabled": true,
+  "media_audio_bitrate_kbps": 192,
+  "media_sample_rate": null,
+  "media_channels": null,
+  "media_lyrics_mode": "plain"
 }

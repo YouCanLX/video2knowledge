@@ -163,10 +163,32 @@ def speak(
     title: str = "Knowledge Audio",
     author: str = "video2knowledge",
     language: str = "zh-CN",
-    apple_music: bool = True,
+    apple_music: bool | None = None,
+    voice: str | None = None,
+    speed: float | None = None,
+    audio_bitrate_kbps: int | None = None,
+    sample_rate: int | None = None,
+    channels: int | None = None,
+    lyrics_mode: str | None = None,
 ):
     """Convert Markdown into speech with LRC timing and an optional Apple Music M4A."""
     settings = Settings.load()
+    overrides = {
+        "mlx_tts_voice": voice,
+        "mlx_tts_speed": speed,
+        "apple_music_enabled": apple_music,
+        "media_audio_bitrate_kbps": audio_bitrate_kbps,
+        "media_sample_rate": sample_rate,
+        "media_channels": channels,
+        "media_lyrics_mode": lyrics_mode,
+    }
+    for name, value in overrides.items():
+        if value is not None:
+            setattr(settings, name, value)
+    try:
+        options = settings.speech_media_options()
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     services = build_services(settings)
     paragraphs = parse_markdown_text(markdown_file.read_text(encoding="utf-8"))
     segments = [TranscriptSegment(0, 0, paragraph) for paragraph in paragraphs]
@@ -179,8 +201,8 @@ def speak(
     document = KnowledgeDocument(item, segments, language=language, audio_path=wav)
     outputs = write_bundle(document, output_dir)
     outputs["audio"] = wav
-    if apple_music:
-        outputs.update(export_apple_music(document, wav, assets_dir))
+    if options.apple_music_enabled:
+        outputs.update(export_apple_music(document, wav, assets_dir, options=options))
     for kind, path in outputs.items():
         typer.echo(f"{kind}: {path}")
 

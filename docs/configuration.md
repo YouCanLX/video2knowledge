@@ -36,6 +36,41 @@ The GUI can start and stop a process launched with `mlx_audio_command`, monitor 
 endpoint, and show the recent process log. It never stops an MLX Audio server that was
 started outside Video2Knowledge. Stop a managed process before changing its command or URL.
 
+## Speech synthesis and media export
+
+These flat JSON keys are also available under **Runtime Settings → Speech synthesis and
+media export**. Invalid values are rejected before saving; older configurations use the
+defaults below. API clients that omit these fields preserve their saved values.
+
+| Setting | Default | Accepted values / purpose |
+| --- | --- | --- |
+| `mlx_tts_speed` | `1.0` | Finite multiplier from `0.25` to `4.0`, sent as `speed` |
+| `mlx_tts_timeout_seconds` | `null` | Positive finite HTTP timeout per segment; `null` means unlimited |
+| `apple_music_enabled` | `true` | Whether `speak` also exports AAC/M4A |
+| `media_audio_bitrate_kbps` | `192` | Integer AAC bitrate from 32 to 320 kbps |
+| `media_sample_rate` | `null` | `8000`, `16000`, `22050`, `24000`, `32000`, `44100`, `48000`; `null` keeps the source rate |
+| `media_channels` | `null` | `1` (mono), `2` (stereo), or `null` to keep source channels |
+| `media_lyrics_mode` | `plain` | `plain` for Apple Music, `synced` for timestamped Light Player lyrics, `none` to omit embedded lyrics |
+
+Model and voice are configured by `mlx_tts_model` and `mlx_tts_voice` above; both must be
+nonblank. The [MLX Audio speech API](https://github.com/Blaizzy/mlx-audio/blob/main/mlx_audio/server.py)
+accepts `speed`, but individual models may ignore it. HTTP timeouts apply to network
+operations within each segment request, not the total synthesis job. Synthesis stays in
+WAV format so LRC/JSON boundaries can be calculated from actual generated durations.
+
+Media settings control the `speak` M4A export, not downloaded source media or the
+`export-light-player` metadata-only command. WAV, Markdown, LRC, timeline JSON, and
+metadata JSON remain available with M4A disabled or when FFmpeg export fails. Selecting
+`none` omits only embedded lyrics; synchronized sidecars are still written. FFmpeg is
+required only when creating M4A. Null rate/channel settings preserve existing behavior.
+
+The `speak` flags `--voice`, `--speed`, `--apple-music` / `--no-apple-music`,
+`--audio-bitrate-kbps`, `--sample-rate`, `--channels`, and `--lyrics-mode` override saved
+values for one invocation without writing configuration. TTS settings also apply to video
+processing when synthesis is requested. Existing completed jobs are still reused; request
+`--force-refresh` to regenerate cached speech after configuration changes. Save runtime
+settings between jobs to avoid changing options during an active multi-segment synthesis.
+
 ## LLM enrichment
 
 `llm_backend` accepts `codex_cli` or `openai_compatible`.
