@@ -1,6 +1,7 @@
 import asyncio
 
 from video2knowledge.knowledge import (
+    KNOWLEDGE_GRAPH_PATH,
     KnowledgeLibrary,
     merge_similar_tags,
     normalize_tag,
@@ -204,3 +205,87 @@ def test_retag_limits_generation_to_selected_collections(tmp_path):
     assert payload["summary"]["selected_documents"] == 1
     assert '  - "topic/风险管理"' in selected.read_text(encoding="utf-8")
     assert skipped.read_text(encoding="utf-8") == "---\ntitle: Two\n---\n# Two\n\nBody"
+
+
+def test_llm_knowledge_graph_syncs_hierarchy_and_linked_documents(tmp_path):
+    class GraphTagger:
+        async def generate_knowledge_graph(self, tags, language):
+            assert language == "zh-CN"
+            assert tags == [
+                {"tag": "交易系统", "count": 2},
+                {"tag": "因子分析", "count": 1},
+                {"tag": "交易策略", "count": 1},
+            ]
+            return {
+                "domains": [
+                    {
+                        "name": "量化交易",
+                        "directions": [
+                            {"name": "系统设计", "tags": ["交易系统", "交易策略"]},
+                            {"name": "研究方法", "tags": ["因子分析"]},
+                        ],
+                    }
+                ]
+            }
+
+    first = tmp_path / "Course" / "one.md"
+    second = tmp_path / "Course" / "two.md"
+    first.parent.mkdir()
+    first.write_text(
+        '---\ntitle: One\ntags:\n  - "topic/交易系统"\n  - "topic/因子分析"\n'
+        '  - "knowledge/旧领域/旧方向/交易系统"\n---\n# One',
+        encoding="utf-8",
+    )
+    second.write_text(
+        "---\ntitle: Two\ntags: [topic/交易系统, topic/交易策略]\n---\n# Two",
+        encoding="utf-8",
+    )
+
+    payload = asyncio.run(KnowledgeLibrary(tmp_path).generate_knowledge_graph(GraphTagger()))
+
+    assert payload["summary"]["graph_source_tags"] == 3
+    assert payload["summary"]["graph_documents_updated"] == 2
+    graph = payload["knowledge_graph"]
+    assert graph["generated"] is True
+    assert graph["source_tag_count"] == 3
+    assert graph["associated_documents"] == 2
+    assert graph["domains"][0]["name"] == "量化交易"
+    assert graph["domains"][0]["directions"][0]["document_count"] == 2
+    assert len(graph["domains"][0]["directions"][0]["tags"][0]["documents"]) == 2
+    assert '  - "knowledge/量化交易/系统设计/交易系统"' in first.read_text(encoding="utf-8")
+    assert "knowledge/旧领域" not in first.read_text(encoding="utf-8")
+    assert (tmp_path / KNOWLEDGE_GRAPH_PATH).is_file()
+
+
+def test_knowledge_graph_uses_only_top_100_topic_tags(tmp_path):
+    class RecordingGraphTagger:
+        def __init__(self):
+            self.tags = []
+
+        async def generate_knowledge_graph(self, tags, language):
+            self.tags = tags
+            return {
+                "domains": [
+                    {
+                        "name": "Domain",
+                        "directions": [
+                            {"name": "Direction", "tags": [item["tag"] for item in tags]}
+                        ],
+                    }
+                ]
+            }
+
+    path = tmp_path / "note.md"
+    tags = [f"topic/tag-{index:03d}" for index in range(105)]
+    path.write_text(
+        "---\nlanguage: en\ntags:\n" + "\n".join(f'  - "{tag}"' for tag in tags) + "\n---\n# Note",
+        encoding="utf-8",
+    )
+    tagger = RecordingGraphTagger()
+
+    payload = asyncio.run(KnowledgeLibrary(tmp_path).generate_knowledge_graph(tagger))
+
+    assert len(tagger.tags) == 100
+    assert tagger.tags[0] == {"tag": "tag-000", "count": 1}
+    assert tagger.tags[-1] == {"tag": "tag-099", "count": 1}
+    assert payload["knowledge_graph"]["source_tag_count"] == 100

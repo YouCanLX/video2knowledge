@@ -260,6 +260,32 @@
           </aside>
         </section>
 
+        <section class="panel semantic-graph-panel" aria-labelledby="semantic-graph-title">
+          <div class="knowledge-heading compact">
+            <div>
+              <h2 id="semantic-graph-title">LLM knowledge graph</h2>
+              <p>Organize the 100 most frequent topic tags into domains and directions, then sync linked Markdown.</p>
+            </div>
+            <div class="semantic-graph-actions">
+              <button type="button" class="secondary" id="expand-all-semantic-graph">
+                Expand all
+              </button>
+              <button type="button" class="secondary" id="collapse-all-semantic-graph">
+                Collapse all
+              </button>
+              <button type="button" id="generate-knowledge-graph">
+                Generate knowledge graph
+              </button>
+            </div>
+          </div>
+          <p class="knowledge-help" id="semantic-graph-status" role="status" aria-live="polite">
+            Generate a graph after document topic tags are ready.
+          </p>
+          <div id="semantic-knowledge-graph">
+            <div class="empty">No LLM knowledge graph yet</div>
+          </div>
+        </section>
+
         <section class="panel knowledge-graph-panel" aria-labelledby="knowledge-graph-title">
           <div class="knowledge-heading compact">
             <div>

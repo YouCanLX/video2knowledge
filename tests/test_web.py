@@ -156,6 +156,10 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="clear-knowledge-collections"' in page.text
     assert 'id="expand-all-knowledge-collections"' in page.text
     assert 'id="collapse-all-knowledge-collections"' in page.text
+    assert 'id="generate-knowledge-graph"' in page.text
+    assert 'id="expand-all-semantic-graph"' in page.text
+    assert 'id="collapse-all-semantic-graph"' in page.text
+    assert 'id="semantic-knowledge-graph"' in page.text
     assert "Generate tags with LLM" in page.text
     assert "documentHasKnowledgeTag" in script.text
     assert "filteredKnowledgeDocuments" in script.text
@@ -165,6 +169,10 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert "data-select-knowledge-collection" in script.text
     assert "data-toggle-knowledge-collection" in script.text
     assert "body: JSON.stringify({ collections })" in script.text
+    assert 'requestJson("/api/knowledge/graph", { method: "POST" })' in script.text
+    assert "data-toggle-semantic-domain" in script.text
+    assert "data-toggle-semantic-direction" in script.text
+    assert "data-semantic-tag" in script.text
     assert "expandedQueueDates" in script.text
     assert "data-queue-date" in script.text
     assert "jobsByDate" in script.text
@@ -243,6 +251,39 @@ def test_knowledge_retag_api_only_updates_selected_collections(tmp_path):
 def test_knowledge_retag_request_requires_a_collection():
     with pytest.raises(ValueError):
         KnowledgeRetagRequest(collections=[])
+
+
+def test_knowledge_graph_api_generates_hierarchy_and_syncs_markdown(tmp_path):
+    class GraphTagger:
+        async def generate_knowledge_graph(self, tags, language):
+            assert tags == [{"tag": "交易系统", "count": 1}]
+            return {
+                "domains": [
+                    {
+                        "name": "交易研究",
+                        "directions": [{"name": "交易系统", "tags": ["交易系统"]}],
+                    }
+                ]
+            }
+
+    async def scenario():
+        settings = Settings.load(tmp_path)
+        note = settings.library_dir / "Course" / "note.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("---\ntitle: Note\ntags: [topic/交易系统]\n---\n# Note", encoding="utf-8")
+        app = create_app(settings)
+        app.state.services.pipeline.enricher = GraphTagger()
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/api/knowledge/graph")
+        return response, note
+
+    response, note = asyncio.run(scenario())
+
+    assert response.status_code == 200
+    assert response.json()["knowledge_graph"]["domains"][0]["name"] == "交易研究"
+    assert response.json()["summary"]["graph_documents_updated"] == 1
+    assert '  - "knowledge/交易研究/交易系统/交易系统"' in note.read_text(encoding="utf-8")
 
 
 def test_bilibili_image_proxy_rejects_non_bilibili_hosts(tmp_path):

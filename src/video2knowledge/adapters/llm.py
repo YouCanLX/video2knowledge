@@ -50,6 +50,45 @@ TAG_SCHEMA = {
     },
     "required": ["tags"],
 }
+KNOWLEDGE_GRAPH_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "domains": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "name": {"type": "string"},
+                    "directions": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "name": {"type": "string"},
+                                "tags": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": 100,
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "required": ["name", "tags"],
+                        },
+                    },
+                },
+                "required": ["name", "directions"],
+            },
+        }
+    },
+    "required": ["domains"],
+}
 
 
 def _build_prompt(title: str, text: str, language: str) -> str:
@@ -82,6 +121,19 @@ Title: {title}
 
 Document:
 {text[:50000]}"""
+
+
+def _build_knowledge_graph_prompt(tags: list[dict], language: str) -> str:
+    tag_lines = "\n".join(f"- {item['tag']}: {item['count']}" for item in tags)
+    return f"""Organize these frequent knowledge tags into a reusable three-level hierarchy:
+domain -> direction -> tag. Write concise domain and direction names in {language}; examples
+include 交易系统, 因子分析, and 交易策略. Use every supplied tag exactly once and preserve its
+exact spelling. Do not invent, merge, rename, or omit tags. Create 1-12 coherent domains and
+1-16 directions per domain. Return only a JSON object with a `domains` array; each domain has
+`name` and `directions`, and each direction has `name` and `tags`.
+
+Tags (frequency):
+{tag_lines}"""
 
 
 def _parse_enrichment(content: str) -> Enrichment:
@@ -117,6 +169,36 @@ def _parse_tags(content: str) -> list[str]:
     ):
         raise ValueError("LLM tags must contain 3-6 non-empty strings")
     return tags
+
+
+def _parse_knowledge_graph(content: str) -> dict:
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[1].rsplit("```", 1)[0]
+    data = json.loads(content)
+    domains = data.get("domains") if isinstance(data, dict) else None
+    if not isinstance(domains, list) or not domains:
+        raise ValueError("LLM knowledge graph must contain a non-empty domains array")
+    for domain in domains:
+        if (
+            not isinstance(domain, dict)
+            or not isinstance(domain.get("name"), str)
+            or not domain["name"].strip()
+            or not isinstance(domain.get("directions"), list)
+            or not domain["directions"]
+        ):
+            raise ValueError("LLM knowledge graph contains an invalid domain")
+        for direction in domain["directions"]:
+            if (
+                not isinstance(direction, dict)
+                or not isinstance(direction.get("name"), str)
+                or not direction["name"].strip()
+                or not isinstance(direction.get("tags"), list)
+                or not direction["tags"]
+                or not all(isinstance(tag, str) and tag.strip() for tag in direction["tags"])
+            ):
+                raise ValueError("LLM knowledge graph contains an invalid direction")
+    return data
 
 
 def _resolve_codex_executable(configured: str) -> str | None:
@@ -166,6 +248,25 @@ class OpenAICompatibleEnricher:
         response.raise_for_status()
         return _parse_tags(response.json()["choices"][0]["message"]["content"])
 
+    async def generate_knowledge_graph(self, tags: list[dict], language: str) -> dict:
+        async with httpx.AsyncClient(timeout=None) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": _build_knowledge_graph_prompt(tags, language),
+                        }
+                    ],
+                    "temperature": 0.1,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+        response.raise_for_status()
+        return _parse_knowledge_graph(response.json()["choices"][0]["message"]["content"])
+
 
 class CodexCliEnricher:
     """Generate knowledge enrichment through the locally installed Codex CLI."""
@@ -191,6 +292,14 @@ class CodexCliEnricher:
             _build_tag_prompt(title, text, language), TAG_SCHEMA, "tag generation"
         )
         return _parse_tags(content)
+
+    async def generate_knowledge_graph(self, tags: list[dict], language: str) -> dict:
+        content = await self._execute(
+            _build_knowledge_graph_prompt(tags, language),
+            KNOWLEDGE_GRAPH_SCHEMA,
+            "knowledge graph generation",
+        )
+        return _parse_knowledge_graph(content)
 
     async def _execute(self, prompt: str, schema: dict, operation: str) -> str:
         executable = _resolve_codex_executable(self.executable)
@@ -263,3 +372,6 @@ class NoopEnricher:
 
     async def generate_tags(self, title: str, text: str, language: str) -> list[str]:
         return []
+
+    async def generate_knowledge_graph(self, tags: list[dict], language: str) -> dict:
+        raise RuntimeError("No local LLM is configured for knowledge graph generation")

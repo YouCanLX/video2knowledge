@@ -6,8 +6,10 @@ import pytest
 import video2knowledge.adapters.llm as llm_module
 from video2knowledge.adapters.llm import (
     CodexCliEnricher,
+    _build_knowledge_graph_prompt,
     _build_tag_prompt,
     _parse_enrichment,
+    _parse_knowledge_graph,
     _parse_tags,
     _resolve_codex_executable,
 )
@@ -80,6 +82,32 @@ def test_tag_prompt_requires_concise_canonical_concepts():
     assert "canonical wording" in prompt
     assert "truncated title" in prompt
     assert "hexadecimal color values" in prompt
+
+
+def test_knowledge_graph_prompt_requires_exact_hierarchy_coverage():
+    prompt = _build_knowledge_graph_prompt(
+        [{"tag": "交易系统", "count": 8}, {"tag": "因子分析", "count": 5}],
+        "zh-CN",
+    )
+
+    assert "domain -> direction -> tag" in prompt
+    assert "every supplied tag exactly once" in prompt
+    assert "交易系统: 8" in prompt
+    assert "因子分析: 5" in prompt
+
+
+def test_parse_knowledge_graph_requires_nested_domains():
+    payload = _parse_knowledge_graph(
+        '{"domains":[{"name":"量化交易","directions":[{"name":"策略研究","tags":["交易策略"]}]}]}'
+    )
+
+    assert payload["domains"][0]["directions"][0]["tags"] == ["交易策略"]
+    with pytest.raises(ValueError, match="non-empty domains"):
+        _parse_knowledge_graph('{"domains":[]}')
+    with pytest.raises(ValueError, match="invalid direction"):
+        _parse_knowledge_graph(
+            '{"domains":[{"name":"量化交易","directions":[{"name":"空","tags":[]}]}]}'
+        )
 
 
 def test_codex_cli_falls_back_to_macos_app_bundle(tmp_path, monkeypatch):

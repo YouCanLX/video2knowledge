@@ -54,7 +54,9 @@ speech and an Apple Music-compatible M4A file.
   across the library. Per-file failures leave the original Markdown unchanged. The searchable
   Knowledge view provides collection summaries, a global tag tree, and a document–tag relationship
   map, with collapsible collection cards, multi-collection LLM tag generation, and one-click
-  filters for popular tags and every tag-tree node.
+  filters for popular tags and every tag-tree node. It can also use the LLM to organize the 100
+  most frequent topic tags into an expandable domain → direction → tag graph, display the linked
+  notes at every leaf, and synchronize `knowledge/domain/direction/tag` paths back to Markdown.
 - ✅ Persists download history and request progress in SQLite with multi-select queue filters
   for creator, collection, status, and created date; collection choices follow the selected
   creators. Collections and individual videos are grouped under collapsible creator rows with

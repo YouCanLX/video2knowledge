@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .models import Enrichment, TranscriptSegment, VideoItem
 
@@ -49,3 +49,7 @@ class TextEnricher(Protocol):
     async def enrich(self, title: str, text: str, language: str) -> Enrichment: ...
 
     async def generate_tags(self, title: str, text: str, language: str) -> list[str]: ...
+
+    async def generate_knowledge_graph(
+        self, tags: list[dict[str, Any]], language: str
+    ) -> dict[str, Any]: ...

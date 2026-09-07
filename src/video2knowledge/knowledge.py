@@ -15,6 +15,8 @@ WORD_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9+._-]{2,}|[\u4e00-\u9fff]{2,8}")
 LEGACY_TAG_LINE = re.compile(r"(?m)^Tags:(?:\s+`[^`\n]+`)+\s*\n?")
 HEX_COLOR_TAG = re.compile(r"[0-9a-f]{6}", re.IGNORECASE)
 TAG_SIMILARITY_THRESHOLD = 0.9
+KNOWLEDGE_GRAPH_PATH = Path(".video2knowledge/knowledge-graph.json")
+KNOWLEDGE_GRAPH_TAG_LIMIT = 100
 GENERIC_TAG_SUFFIXES = (
     "介绍",
     "入门",
@@ -165,6 +167,75 @@ def _remove_legacy_tag_line(markdown: str) -> str:
     return LEGACY_TAG_LINE.sub("", markdown, count=1)
 
 
+def _graph_label(value: Any) -> str:
+    label = re.sub(r"\s+", " ", str(value or "")).strip().strip("#/")
+    if not label or len(label) > 80:
+        raise ValueError("Knowledge graph labels must contain 1-80 characters")
+    return label
+
+
+def _graph_path_segment(value: str) -> str:
+    return normalize_tag(value).replace("/", "-")
+
+
+def _normalize_knowledge_graph(
+    result: dict[str, Any], source_tags: list[str], language: str
+) -> dict[str, Any]:
+    """Validate an LLM hierarchy and ensure every source tag appears exactly once."""
+    domains = result.get("domains") if isinstance(result, dict) else None
+    if not isinstance(domains, list):
+        raise ValueError("The LLM knowledge graph must contain a domains array")
+    source_by_key = {normalize_tag(tag): tag for tag in source_tags}
+    assigned: set[str] = set()
+    normalized_domains: list[dict[str, Any]] = []
+    for raw_domain in domains:
+        if not isinstance(raw_domain, dict) or not isinstance(raw_domain.get("directions"), list):
+            continue
+        directions: list[dict[str, Any]] = []
+        for raw_direction in raw_domain["directions"]:
+            if not isinstance(raw_direction, dict) or not isinstance(
+                raw_direction.get("tags"), list
+            ):
+                continue
+            tags: list[str] = []
+            for raw_tag in raw_direction["tags"]:
+                key = normalize_tag(str(raw_tag))
+                if key in source_by_key and key not in assigned:
+                    tags.append(source_by_key[key])
+                    assigned.add(key)
+            if tags:
+                directions.append({"name": _graph_label(raw_direction.get("name")), "tags": tags})
+        if directions:
+            normalized_domains.append(
+                {"name": _graph_label(raw_domain.get("name")), "directions": directions}
+            )
+    missing = [tag for tag in source_tags if normalize_tag(tag) not in assigned]
+    if missing:
+        chinese = language.casefold().startswith("zh")
+        normalized_domains.append(
+            {
+                "name": "其他主题" if chinese else "Other topics",
+                "directions": [{"name": "未分类" if chinese else "Uncategorized", "tags": missing}],
+            }
+        )
+    if not normalized_domains:
+        raise ValueError("The LLM knowledge graph did not classify any topic tags")
+    return {
+        "version": 1,
+        "tag_limit": KNOWLEDGE_GRAPH_TAG_LIMIT,
+        "domains": normalized_domains,
+    }
+
+
+def _knowledge_graph_mapping(graph: dict[str, Any]) -> dict[str, tuple[str, str]]:
+    mapping: dict[str, tuple[str, str]] = {}
+    for domain in graph.get("domains", []):
+        for direction in domain.get("directions", []):
+            for tag in direction.get("tags", []):
+                mapping[normalize_tag(tag)] = (domain["name"], direction["name"])
+    return mapping
+
+
 def _metadata_for(path: Path) -> dict[str, Any]:
     candidates = list((path.parent / "assets").glob("*.metadata.json"))
     for candidate in candidates:
@@ -203,6 +274,53 @@ class KnowledgeLibrary:
 
     def __init__(self, root: Path):
         self.root = root
+
+    def _load_knowledge_graph(self) -> dict[str, Any]:
+        try:
+            graph = json.loads((self.root / KNOWLEDGE_GRAPH_PATH).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"version": 1, "tag_limit": KNOWLEDGE_GRAPH_TAG_LIMIT, "domains": []}
+        if not isinstance(graph, dict) or not isinstance(graph.get("domains"), list):
+            return {"version": 1, "tag_limit": KNOWLEDGE_GRAPH_TAG_LIMIT, "domains": []}
+        try:
+            for domain in graph["domains"]:
+                _graph_label(domain["name"])
+                if not isinstance(domain["directions"], list):
+                    raise TypeError
+                for direction in domain["directions"]:
+                    _graph_label(direction["name"])
+                    if not isinstance(direction["tags"], list) or not all(
+                        isinstance(tag, str) and tag.strip() for tag in direction["tags"]
+                    ):
+                        raise TypeError
+        except (KeyError, TypeError, ValueError):
+            return {"version": 1, "tag_limit": KNOWLEDGE_GRAPH_TAG_LIMIT, "domains": []}
+        return graph
+
+    def _save_knowledge_graph(self, graph: dict[str, Any]) -> None:
+        path = self.root / KNOWLEDGE_GRAPH_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(graph, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        temporary.replace(path)
+
+    @staticmethod
+    def _knowledge_tags(topics: list[str], graph: dict[str, Any]) -> list[str]:
+        mapping = _knowledge_graph_mapping(graph)
+        return [
+            "/".join(
+                (
+                    "knowledge",
+                    _graph_path_segment(mapping[topic][0]),
+                    _graph_path_segment(mapping[topic][1]),
+                    topic,
+                )
+            )
+            for topic in topics
+            if topic in mapping
+        ]
 
     def build(self) -> dict[str, Any]:
         documents: list[dict[str, Any]] = []
@@ -246,7 +364,7 @@ class KnowledgeLibrary:
                     "headings": re.findall(r"^#{2,3}\s+(.+)$", body, re.MULTILINE)[:8],
                 }
             )
-        return self._payload(documents, 0, [])
+        return self._payload(documents, 0, [], self._load_knowledge_graph())
 
     async def retag(
         self, tagger: TextEnricher, collections: set[str] | None = None
@@ -261,6 +379,7 @@ class KnowledgeLibrary:
         updated = 0
         failures: list[dict[str, str]] = []
         generated: dict[str, list[str]] = {}
+        knowledge_graph = self._load_knowledge_graph()
         semaphore = asyncio.Semaphore(3)
 
         async def classify(document: dict[str, Any]) -> None:
@@ -304,6 +423,7 @@ class KnowledgeLibrary:
                     author=document["author"],
                     collection=document["collection"],
                 )
+                tags.extend(self._knowledge_tags(merged_topics, knowledge_graph))
                 rewritten = _write_tags(markdown_without_legacy_tags, tags)
                 if rewritten != markdown:
                     await asyncio.to_thread(path.write_text, rewritten, encoding="utf-8")
@@ -321,9 +441,65 @@ class KnowledgeLibrary:
         refreshed["failures"] = failures
         return refreshed
 
+    async def generate_knowledge_graph(self, tagger: TextEnricher) -> dict[str, Any]:
+        """Use the LLM to organize the 100 most frequent topics and sync Markdown paths."""
+        current = self.build()
+        documents = [
+            document
+            for collection in current["collections"]
+            for document in collection["documents"]
+        ]
+        topic_counts = Counter(
+            tag.removeprefix("topic/")
+            for document in documents
+            for tag in document["tags"]
+            if tag.startswith("topic/") and tag != "topic/"
+        )
+        ranked_topics = topic_counts.most_common(KNOWLEDGE_GRAPH_TAG_LIMIT)
+        if not ranked_topics:
+            raise ValueError("Generate document topic tags before building the knowledge graph")
+        languages = Counter(document["language"] for document in documents)
+        language = languages.most_common(1)[0][0] if languages else "zh-CN"
+        result = await tagger.generate_knowledge_graph(
+            [{"tag": tag, "count": count} for tag, count in ranked_topics], language
+        )
+        graph = _normalize_knowledge_graph(result, [tag for tag, _ in ranked_topics], language)
+        self._save_knowledge_graph(graph)
+        mapping = _knowledge_graph_mapping(graph)
+        updated = 0
+        failures: list[dict[str, str]] = []
+        for document in documents:
+            base_tags = [tag for tag in document["tags"] if not tag.startswith("knowledge/")]
+            topics = [
+                tag.removeprefix("topic/")
+                for tag in base_tags
+                if tag.startswith("topic/") and tag.removeprefix("topic/") in mapping
+            ]
+            synced_tags = list(dict.fromkeys(base_tags + self._knowledge_tags(topics, graph)))
+            if synced_tags == document["tags"]:
+                continue
+            path = self.root / document["id"]
+            try:
+                markdown = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                rewritten = _write_tags(markdown, synced_tags)
+                if rewritten != markdown:
+                    await asyncio.to_thread(path.write_text, rewritten, encoding="utf-8")
+                    updated += 1
+            except Exception as exc:  # noqa: BLE001 - retain each unaffected Markdown file
+                failures.append({"id": document["id"], "error": str(exc)})
+        refreshed = self.build()
+        refreshed["summary"]["graph_documents_updated"] = updated
+        refreshed["summary"]["graph_source_tags"] = len(ranked_topics)
+        refreshed["summary"]["failed"] = len(failures)
+        refreshed["failures"] = failures
+        return refreshed
+
     @staticmethod
     def _payload(
-        documents: list[dict[str, Any]], updated: int, failures: list[dict[str, str]]
+        documents: list[dict[str, Any]],
+        updated: int,
+        failures: list[dict[str, str]],
+        knowledge_graph: dict[str, Any],
     ) -> dict[str, Any]:
         tag_counts = Counter(tag for document in documents for tag in document["tags"])
         grouped: dict[str, list[dict[str, Any]]] = {}
@@ -379,6 +555,58 @@ class KnowledgeLibrary:
             for tag in doc["tags"]
             if tag in visible_tags
         ]
+        graph_mapping = _knowledge_graph_mapping(knowledge_graph)
+        graph_documents: dict[str, list[dict[str, str]]] = {}
+        for document in documents:
+            for tag in document["tags"]:
+                topic = tag.removeprefix("topic/")
+                if tag.startswith("topic/") and topic in graph_mapping:
+                    graph_documents.setdefault(topic, []).append(
+                        {
+                            "id": document["id"],
+                            "title": document["title"],
+                            "collection": document["collection"],
+                        }
+                    )
+        semantic_domains = []
+        for domain in knowledge_graph.get("domains", []):
+            directions = []
+            for direction in domain.get("directions", []):
+                tags = [
+                    {
+                        "name": tag,
+                        "path": f"topic/{tag}",
+                        "count": len(graph_documents.get(normalize_tag(tag), [])),
+                        "documents": graph_documents.get(normalize_tag(tag), []),
+                    }
+                    for tag in direction.get("tags", [])
+                ]
+                document_ids = {document["id"] for tag in tags for document in tag["documents"]}
+                directions.append(
+                    {
+                        "name": direction["name"],
+                        "tag_count": len(tags),
+                        "document_count": len(document_ids),
+                        "tags": tags,
+                    }
+                )
+            document_ids = {
+                document["id"]
+                for direction in directions
+                for tag in direction["tags"]
+                for document in tag["documents"]
+            }
+            semantic_domains.append(
+                {
+                    "name": domain["name"],
+                    "tag_count": sum(direction["tag_count"] for direction in directions),
+                    "document_count": len(document_ids),
+                    "directions": directions,
+                }
+            )
+        associated_ids = {
+            document["id"] for members in graph_documents.values() for document in members
+        }
         return {
             "summary": {
                 "documents": len(documents),
@@ -391,5 +619,16 @@ class KnowledgeLibrary:
             "collections": collections,
             "tag_tree": tree_list(tree),
             "graph": {"nodes": nodes, "edges": edges},
+            "knowledge_graph": {
+                "generated": bool(semantic_domains),
+                "tag_limit": knowledge_graph.get("tag_limit", KNOWLEDGE_GRAPH_TAG_LIMIT),
+                "source_tag_count": sum(
+                    direction["tag_count"]
+                    for domain in semantic_domains
+                    for direction in domain["directions"]
+                ),
+                "associated_documents": len(associated_ids),
+                "domains": semantic_domains,
+            },
             "failures": failures,
         }

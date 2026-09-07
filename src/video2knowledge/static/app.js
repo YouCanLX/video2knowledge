@@ -61,6 +61,8 @@ let knowledgeFocus = null;
 let knowledgeBusy = false;
 const selectedKnowledgeCollections = new Set();
 const expandedKnowledgeCollections = new Set();
+const expandedKnowledgeDomains = new Set();
+const expandedKnowledgeDirections = new Set();
 
 function jobNeedsPolling(job) {
   return Boolean(job.session_active)
@@ -1918,6 +1920,112 @@ function renderKnowledgeTree() {
   });
 }
 
+function semanticGraphKeys() {
+  const domains = knowledgeData?.knowledge_graph?.domains || [];
+  return {
+    domains: domains.map((_domain, domainIndex) => `${domainIndex}`),
+    directions: domains.flatMap((domain, domainIndex) =>
+      domain.directions.map((_direction, directionIndex) => `${domainIndex}:${directionIndex}`)),
+  };
+}
+
+function pruneSemanticGraphState() {
+  const keys = semanticGraphKeys();
+  const domainKeys = new Set(keys.domains);
+  const directionKeys = new Set(keys.directions);
+  [...expandedKnowledgeDomains].forEach((key) => {
+    if (!domainKeys.has(key)) expandedKnowledgeDomains.delete(key);
+  });
+  [...expandedKnowledgeDirections].forEach((key) => {
+    if (!directionKeys.has(key)) expandedKnowledgeDirections.delete(key);
+  });
+}
+
+function renderSemanticGraphControls() {
+  const graph = knowledgeData?.knowledge_graph;
+  const generated = Boolean(graph?.generated);
+  const hasTopics = knowledgeDocuments().some((document) =>
+    (document.tags || []).some((tag) => tag.startsWith("topic/")));
+  const generate = select("#generate-knowledge-graph");
+  generate.disabled = knowledgeBusy || !hasTopics;
+  select("#expand-all-semantic-graph").disabled = knowledgeBusy || !generated;
+  select("#collapse-all-semantic-graph").disabled = knowledgeBusy || !generated;
+}
+
+function renderSemanticKnowledgeGraph() {
+  pruneSemanticGraphState();
+  renderSemanticGraphControls();
+  const graph = knowledgeData?.knowledge_graph;
+  const container = select("#semantic-knowledge-graph");
+  if (!graph?.generated) {
+    container.innerHTML = '<div class="empty">No LLM knowledge graph yet</div>';
+    return;
+  }
+  container.innerHTML = graph.domains.map((domain, domainIndex) => {
+    const domainKey = `${domainIndex}`;
+    const domainExpanded = expandedKnowledgeDomains.has(domainKey);
+    const domainContentId = `semantic-domain-${domainIndex}`;
+    return `
+      <article class="semantic-domain">
+        <button type="button" class="semantic-node-heading" data-toggle-semantic-domain="${domainKey}"
+          aria-expanded="${domainExpanded}" aria-controls="${domainContentId}">
+          <span><strong>${escapeHtml(domain.name)}</strong><small>${domain.tag_count} tags · ${domain.document_count} linked notes</small></span>
+          <span aria-hidden="true">${domainExpanded ? "−" : "+"}</span>
+        </button>
+        <div class="semantic-domain-content" id="${domainContentId}" ${domainExpanded ? "" : "hidden"}>
+          ${domain.directions.map((direction, directionIndex) => {
+            const directionKey = `${domainIndex}:${directionIndex}`;
+            const directionExpanded = expandedKnowledgeDirections.has(directionKey);
+            const directionContentId = `semantic-direction-${domainIndex}-${directionIndex}`;
+            return `
+              <section class="semantic-direction">
+                <button type="button" class="semantic-node-heading direction" data-toggle-semantic-direction="${directionKey}"
+                  aria-expanded="${directionExpanded}" aria-controls="${directionContentId}">
+                  <span><strong>${escapeHtml(direction.name)}</strong><small>${direction.tag_count} tags · ${direction.document_count} notes</small></span>
+                  <span aria-hidden="true">${directionExpanded ? "−" : "+"}</span>
+                </button>
+                <div class="semantic-direction-content" id="${directionContentId}" ${directionExpanded ? "" : "hidden"}>
+                  ${direction.tags.map((tag) => `
+                    <details class="semantic-tag">
+                      <summary>
+                        <span>#${escapeHtml(tag.name)}</span>
+                        <small>${tag.count} linked note(s)</small>
+                      </summary>
+                      <button type="button" class="secondary" data-semantic-tag="${escapeHtml(tag.path)}">Filter collection notes</button>
+                      <ul>${tag.documents.map((document) => `
+                        <li><strong>${escapeHtml(document.title)}</strong><small>${escapeHtml(document.collection)}</small></li>
+                      `).join("") || "<li>No currently linked documents</li>"}</ul>
+                    </details>
+                  `).join("")}
+                </div>
+              </section>
+            `;
+          }).join("")}
+        </div>
+      </article>
+    `;
+  }).join("");
+  container.querySelectorAll("[data-toggle-semantic-domain]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.toggleSemanticDomain;
+      if (expandedKnowledgeDomains.has(key)) expandedKnowledgeDomains.delete(key);
+      else expandedKnowledgeDomains.add(key);
+      renderSemanticKnowledgeGraph();
+    });
+  });
+  container.querySelectorAll("[data-toggle-semantic-direction]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.toggleSemanticDirection;
+      if (expandedKnowledgeDirections.has(key)) expandedKnowledgeDirections.delete(key);
+      else expandedKnowledgeDirections.add(key);
+      renderSemanticKnowledgeGraph();
+    });
+  });
+  container.querySelectorAll("[data-semantic-tag]").forEach((button) => {
+    button.addEventListener("click", () => setKnowledgeTagFilter(button.dataset.semanticTag));
+  });
+}
+
 function renderKnowledgeGraph() {
   const allDocuments = filteredKnowledgeDocuments();
   let documents = allDocuments;
@@ -1954,6 +2062,7 @@ function renderKnowledge() {
   renderKnowledgeFilters();
   renderKnowledgeCollections();
   renderKnowledgeTree();
+  renderSemanticKnowledgeGraph();
   renderKnowledgeGraph();
   select("#reset-knowledge-focus").disabled = !knowledgeFocus;
 }
@@ -1968,6 +2077,7 @@ async function loadKnowledge(writeTags = false) {
   knowledgeBusy = true;
   button.textContent = writeTags ? "Generating tags…" : "Generate tags with LLM";
   renderKnowledgeSelectionControls();
+  renderSemanticGraphControls();
   select("#knowledge-status").textContent = writeTags ? "Generating replacement tags with the configured LLM…" : "Scanning local Markdown…";
   try {
     knowledgeData = await requestJson(
@@ -1981,6 +2091,10 @@ async function loadKnowledge(writeTags = false) {
         : { method: "GET" },
     );
     renderKnowledge();
+    const semanticGraph = knowledgeData.knowledge_graph;
+    select("#semantic-graph-status").textContent = semanticGraph.generated
+      ? `${semanticGraph.source_tag_count} top tag(s) in ${semanticGraph.domains.length} domain(s), linked to ${semanticGraph.associated_documents} note(s).`
+      : "Generate a graph after document topic tags are ready.";
     const updated = knowledgeData.summary.updated;
     const failed = knowledgeData.summary.failed || 0;
     select("#knowledge-status").textContent = writeTags
@@ -1992,6 +2106,34 @@ async function loadKnowledge(writeTags = false) {
     knowledgeBusy = false;
     button.textContent = "Generate tags with LLM";
     renderKnowledgeSelectionControls();
+    renderSemanticGraphControls();
+  }
+}
+
+async function generateKnowledgeGraph() {
+  const button = select("#generate-knowledge-graph");
+  knowledgeBusy = true;
+  button.textContent = "Generating graph…";
+  select("#semantic-graph-status").textContent = "Classifying the 100 most frequent topic tags and synchronizing Markdown…";
+  renderKnowledgeSelectionControls();
+  renderSemanticGraphControls();
+  try {
+    knowledgeData = await requestJson("/api/knowledge/graph", { method: "POST" });
+    expandedKnowledgeDomains.clear();
+    expandedKnowledgeDirections.clear();
+    const keys = semanticGraphKeys();
+    keys.domains.forEach((key) => expandedKnowledgeDomains.add(key));
+    keys.directions.forEach((key) => expandedKnowledgeDirections.add(key));
+    renderKnowledge();
+    const graph = knowledgeData.knowledge_graph;
+    select("#semantic-graph-status").textContent = `${graph.source_tag_count} top tag(s) organized into ${graph.domains.length} domain(s); ${knowledgeData.summary.graph_documents_updated} Markdown file(s) synchronized.`;
+  } catch (error) {
+    select("#semantic-graph-status").textContent = error.message;
+  } finally {
+    knowledgeBusy = false;
+    button.textContent = "Generate knowledge graph";
+    renderKnowledgeSelectionControls();
+    renderSemanticGraphControls();
   }
 }
 
@@ -2137,6 +2279,18 @@ select("#clear-knowledge-tag").addEventListener("click", () => {
   renderKnowledge();
 });
 select("#reindex-knowledge").addEventListener("click", () => loadKnowledge(true));
+select("#generate-knowledge-graph").addEventListener("click", generateKnowledgeGraph);
+select("#expand-all-semantic-graph").addEventListener("click", () => {
+  const keys = semanticGraphKeys();
+  keys.domains.forEach((key) => expandedKnowledgeDomains.add(key));
+  keys.directions.forEach((key) => expandedKnowledgeDirections.add(key));
+  renderSemanticKnowledgeGraph();
+});
+select("#collapse-all-semantic-graph").addEventListener("click", () => {
+  expandedKnowledgeDomains.clear();
+  expandedKnowledgeDirections.clear();
+  renderSemanticKnowledgeGraph();
+});
 select("#select-all-knowledge-collections").addEventListener("click", () => {
   (knowledgeData?.collections || []).forEach((collection) => {
     selectedKnowledgeCollections.add(collection.name);

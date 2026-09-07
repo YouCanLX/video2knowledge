@@ -727,6 +727,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except OSError as exc:
             raise HTTPException(500, f"Could not update Markdown tags: {exc}") from exc
 
+    @app.post("/api/knowledge/graph")
+    async def generate_knowledge_graph():
+        try:
+            return await KnowledgeLibrary(settings.library_dir).generate_knowledge_graph(
+                services.pipeline.enricher
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(500, f"Could not update the knowledge graph: {exc}") from exc
+
     @app.get("/api/settings")
     async def get_settings():
         return _settings_payload(settings)
