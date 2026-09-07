@@ -177,3 +177,30 @@ def test_retag_drops_color_and_numeric_artifacts(tmp_path):
     assert "fff7d6" not in content
     assert "x27" not in content
     assert "交易市场的" not in content
+
+
+def test_retag_limits_generation_to_selected_collections(tmp_path):
+    class RecordingTagger:
+        def __init__(self):
+            self.titles = []
+
+        async def generate_tags(self, title, text, language):
+            self.titles.append(title)
+            return ["风险管理", "交易心理", "执行纪律"]
+
+    selected = tmp_path / "Creator" / "Selected" / "One" / "one.md"
+    skipped = tmp_path / "Creator" / "Skipped" / "Two" / "two.md"
+    selected.parent.mkdir(parents=True)
+    skipped.parent.mkdir(parents=True)
+    selected.write_text("---\ntitle: One\n---\n# One\n\nBody", encoding="utf-8")
+    skipped.write_text("---\ntitle: Two\n---\n# Two\n\nBody", encoding="utf-8")
+    tagger = RecordingTagger()
+
+    payload = asyncio.run(KnowledgeLibrary(tmp_path).retag(tagger, {"Selected"}))
+
+    assert tagger.titles == ["One"]
+    assert payload["summary"]["updated"] == 1
+    assert payload["summary"]["selected_collections"] == 1
+    assert payload["summary"]["selected_documents"] == 1
+    assert '  - "topic/风险管理"' in selected.read_text(encoding="utf-8")
+    assert skipped.read_text(encoding="utf-8") == "---\ntitle: Two\n---\n# Two\n\nBody"

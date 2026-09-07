@@ -201,7 +201,20 @@
               <h2>Knowledge Collections</h2>
               <p>Explore related notes together, with Obsidian-compatible tags and a global map.</p>
             </div>
-            <button type="button" id="reindex-knowledge">Generate tags with LLM</button>
+            <div class="knowledge-retag-controls">
+              <small id="knowledge-collection-selection" aria-live="polite">
+                Select one or more collections below
+              </small>
+              <div>
+                <button type="button" class="secondary" id="select-all-knowledge-collections">
+                  Select all
+                </button>
+                <button type="button" class="secondary" id="clear-knowledge-collections" disabled>
+                  Clear
+                </button>
+                <button type="button" id="reindex-knowledge" disabled>Generate tags with LLM</button>
+              </div>
+            </div>
           </div>
           <div class="knowledge-stats" id="knowledge-stats" aria-live="polite">
             <div><strong>—</strong><span>Documents</span></div>
@@ -227,7 +240,17 @@
 
         <section class="knowledge-layout">
           <section class="panel knowledge-collections-panel" aria-labelledby="knowledge-collections-title">
-            <h2 id="knowledge-collections-title">Collection analysis</h2>
+            <div class="knowledge-panel-heading">
+              <h2 id="knowledge-collections-title">Collection analysis</h2>
+              <div>
+                <button type="button" class="secondary" id="expand-all-knowledge-collections">
+                  Expand all
+                </button>
+                <button type="button" class="secondary" id="collapse-all-knowledge-collections">
+                  Collapse all
+                </button>
+              </div>
+            </div>
             <div id="knowledge-collections"><div class="empty">Loading knowledge library…</div></div>
           </section>
           <aside class="panel tag-tree-panel" aria-labelledby="tag-tree-title">

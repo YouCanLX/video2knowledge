@@ -11,6 +11,7 @@ from video2knowledge.urls import extract_bilibili_bvid, extract_bilibili_creator
 from video2knowledge.web import (
     CollectionSelection,
     CreatorBatchRequest,
+    KnowledgeRetagRequest,
     _expand_creator_batch,
     _runtime_preflight,
     create_app,
@@ -151,11 +152,19 @@ def test_web_app_serves_template_and_static_assets(tmp_path):
     assert 'id="knowledge-graph"' in page.text
     assert 'id="knowledge-tag-filters"' in page.text
     assert 'id="clear-knowledge-tag"' in page.text
+    assert 'id="select-all-knowledge-collections"' in page.text
+    assert 'id="clear-knowledge-collections"' in page.text
+    assert 'id="expand-all-knowledge-collections"' in page.text
+    assert 'id="collapse-all-knowledge-collections"' in page.text
     assert "Generate tags with LLM" in page.text
     assert "documentHasKnowledgeTag" in script.text
     assert "filteredKnowledgeDocuments" in script.text
     assert "data-quick-knowledge-tag" in script.text
-    assert 'requestJson(writeTags ? "/api/knowledge/reindex" : "/api/knowledge"' in script.text
+    assert "selectedKnowledgeCollections" in script.text
+    assert "expandedKnowledgeCollections" in script.text
+    assert "data-select-knowledge-collection" in script.text
+    assert "data-toggle-knowledge-collection" in script.text
+    assert "body: JSON.stringify({ collections })" in script.text
     assert "expandedQueueDates" in script.text
     assert "data-queue-date" in script.text
     assert "jobsByDate" in script.text
@@ -178,7 +187,9 @@ def test_knowledge_api_indexes_and_tags_markdown_collections(tmp_path):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             before = await client.get("/api/knowledge")
-            rebuilt = await client.post("/api/knowledge/reindex")
+            rebuilt = await client.post(
+                "/api/knowledge/reindex", json={"collections": ["Collection"]}
+            )
         return before, rebuilt, note
 
     before, rebuilt, note = asyncio.run(scenario())
@@ -190,6 +201,48 @@ def test_knowledge_api_indexes_and_tags_markdown_collections(tmp_path):
     content = note.read_text(encoding="utf-8")
     assert '  - "collection/collection"' in content
     assert '  - "topic/knowledge-graphs"' in content
+
+
+def test_knowledge_retag_api_only_updates_selected_collections(tmp_path):
+    class RecordingTagger:
+        def __init__(self):
+            self.titles = []
+
+        async def generate_tags(self, title, text, language):
+            self.titles.append(title)
+            return ["Knowledge graphs", "Network science", "Visualization"]
+
+    async def scenario():
+        settings = Settings.load(tmp_path)
+        selected = settings.library_dir / "Creator" / "Selected" / "Bundle" / "one.md"
+        skipped = settings.library_dir / "Creator" / "Skipped" / "Bundle" / "two.md"
+        selected.parent.mkdir(parents=True)
+        skipped.parent.mkdir(parents=True)
+        selected.write_text("---\ntitle: One\n---\n# One\n\nBody", encoding="utf-8")
+        skipped.write_text("---\ntitle: Two\n---\n# Two\n\nBody", encoding="utf-8")
+        app = create_app(settings)
+        tagger = RecordingTagger()
+        app.state.services.pipeline.enricher = tagger
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/api/knowledge/reindex", json={"collections": ["Selected"]}
+            )
+        return response, selected, skipped, tagger
+
+    response, selected, skipped, tagger = asyncio.run(scenario())
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["selected_collections"] == 1
+    assert response.json()["summary"]["selected_documents"] == 1
+    assert tagger.titles == ["One"]
+    assert '  - "topic/knowledge-graphs"' in selected.read_text(encoding="utf-8")
+    assert skipped.read_text(encoding="utf-8") == "---\ntitle: Two\n---\n# Two\n\nBody"
+
+
+def test_knowledge_retag_request_requires_a_collection():
+    with pytest.raises(ValueError):
+        KnowledgeRetagRequest(collections=[])
 
 
 def test_bilibili_image_proxy_rejects_non_bilibili_hosts(tmp_path):

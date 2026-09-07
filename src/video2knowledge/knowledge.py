@@ -248,12 +248,15 @@ class KnowledgeLibrary:
             )
         return self._payload(documents, 0, [])
 
-    async def retag(self, tagger: TextEnricher) -> dict[str, Any]:
+    async def retag(
+        self, tagger: TextEnricher, collections: set[str] | None = None
+    ) -> dict[str, Any]:
         """Replace prior tags only after successful LLM classification of each document."""
         documents = [
             document
             for collection in self.build()["collections"]
             for document in collection["documents"]
+            if collections is None or document["collection"] in collections
         ]
         updated = 0
         failures: list[dict[str, str]] = []
@@ -311,6 +314,10 @@ class KnowledgeLibrary:
         refreshed["summary"]["updated"] = updated
         refreshed["summary"]["merged_tags"] = len(aliases)
         refreshed["summary"]["failed"] = len(failures)
+        refreshed["summary"]["selected_collections"] = len(
+            {document["collection"] for document in documents}
+        )
+        refreshed["summary"]["selected_documents"] = len(documents)
         refreshed["failures"] = failures
         return refreshed
 

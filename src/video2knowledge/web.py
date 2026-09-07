@@ -77,6 +77,10 @@ class DeleteDownloadHistoryRequest(BaseModel):
     delete_files: bool = False
 
 
+class KnowledgeRetagRequest(BaseModel):
+    collections: list[str] = Field(min_length=1, max_length=500)
+
+
 class RuntimeSettingsRequest(BaseModel):
     library_dir: str = Field(min_length=1)
     mlx_base_url: str = Field(min_length=1)
@@ -712,9 +716,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return await asyncio.to_thread(KnowledgeLibrary(settings.library_dir).build)
 
     @app.post("/api/knowledge/reindex")
-    async def reindex_knowledge_library():
+    async def reindex_knowledge_library(body: KnowledgeRetagRequest):
+        collections = {name.strip() for name in body.collections if name.strip()}
+        if not collections:
+            raise HTTPException(422, "Select at least one knowledge collection")
         try:
-            return await KnowledgeLibrary(settings.library_dir).retag(services.pipeline.enricher)
+            return await KnowledgeLibrary(settings.library_dir).retag(
+                services.pipeline.enricher, collections
+            )
         except OSError as exc:
             raise HTTPException(500, f"Could not update Markdown tags: {exc}") from exc
 

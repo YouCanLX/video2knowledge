@@ -58,6 +58,9 @@ let historyPollTimer = null;
 let mlxPollTimer = null;
 let knowledgeData = null;
 let knowledgeFocus = null;
+let knowledgeBusy = false;
+const selectedKnowledgeCollections = new Set();
+const expandedKnowledgeCollections = new Set();
 
 function jobNeedsPolling(job) {
   return Boolean(job.session_active)
@@ -1776,6 +1779,29 @@ function renderKnowledgeStats() {
   });
 }
 
+function pruneKnowledgeCollectionState() {
+  const available = new Set((knowledgeData?.collections || []).map((collection) => collection.name));
+  [selectedKnowledgeCollections, expandedKnowledgeCollections].forEach((state) => {
+    [...state].forEach((name) => {
+      if (!available.has(name)) state.delete(name);
+    });
+  });
+}
+
+function renderKnowledgeSelectionControls() {
+  const total = knowledgeData?.collections?.length || 0;
+  const selected = selectedKnowledgeCollections.size;
+  select("#knowledge-collection-selection").textContent = selected
+    ? `${selected} of ${total} collection(s) selected for tag generation`
+    : "Select one or more collections below";
+  select("#reindex-knowledge").disabled = knowledgeBusy || !selected;
+  select("#select-all-knowledge-collections").disabled = knowledgeBusy || !total || selected === total;
+  select("#clear-knowledge-collections").disabled = knowledgeBusy || !selected;
+  select("#knowledge-collections").querySelectorAll("[data-select-knowledge-collection]").forEach((input) => {
+    input.disabled = knowledgeBusy;
+  });
+}
+
 function renderKnowledgeCollections() {
   const query = select("#knowledge-query").value.trim().toLowerCase();
   const tagPath = activeKnowledgeTag();
@@ -1783,28 +1809,65 @@ function renderKnowledgeCollections() {
     ...collection,
     visibleDocuments: collection.documents.filter((document) => documentMatchesKnowledge(document, query, tagPath)),
   })).filter((collection) => collection.visibleDocuments.length);
-  select("#knowledge-collections").innerHTML = collections.map((collection) => `
-    <article class="knowledge-collection ${knowledgeFocus?.type === "collection" && knowledgeFocus.value === collection.name ? "selected" : ""}">
-      <button type="button" class="knowledge-collection-summary" data-knowledge-collection="${escapeHtml(collection.name)}">
-        <span><strong>${escapeHtml(collection.name)}</strong><small>${collection.visibleDocuments.length} notes · ${collection.word_count.toLocaleString()} words</small></span>
-        <span aria-hidden="true">→</span>
-      </button>
-      <div class="knowledge-tag-row">${collection.top_tags.slice(0, 6).map((tag) => `<button type="button" data-knowledge-tag="${escapeHtml(tag)}">#${escapeHtml(tag)}</button>`).join("")}</div>
-      <div class="knowledge-document-list">
-        ${collection.visibleDocuments.map((document) => `
-          <details>
-            <summary><strong>${escapeHtml(document.title)}</strong><span>${document.word_count} words</span></summary>
-            <p>${escapeHtml(document.excerpt || "No readable preview")}</p>
-            ${(document.headings || []).length ? `<small>Sections · ${document.headings.map(escapeHtml).join(" · ")}</small>` : ""}
-          </details>
-        `).join("")}
+  select("#knowledge-collections").innerHTML = collections.map((collection, index) => {
+    const expanded = expandedKnowledgeCollections.has(collection.name);
+    const selectedForRetag = selectedKnowledgeCollections.has(collection.name);
+    const focused = knowledgeFocus?.type === "collection" && knowledgeFocus.value === collection.name;
+    const contentId = `knowledge-collection-content-${index}`;
+    return `
+    <article class="knowledge-collection ${focused ? "selected" : ""} ${selectedForRetag ? "retag-selected" : ""}">
+      <div class="knowledge-collection-summary">
+        <label class="knowledge-collection-choice">
+          <input type="checkbox" data-select-knowledge-collection="${escapeHtml(collection.name)}"
+            ${selectedForRetag ? "checked" : ""} ${knowledgeBusy ? "disabled" : ""}>
+          <span><strong>${escapeHtml(collection.name)}</strong><small>${collection.visibleDocuments.length} notes · ${collection.word_count.toLocaleString()} words</small></span>
+        </label>
+        <div class="knowledge-collection-actions">
+          <button type="button" class="secondary" data-knowledge-collection="${escapeHtml(collection.name)}">
+            ${focused ? "Map selected" : "Focus map"}
+          </button>
+          <button type="button" class="secondary" data-toggle-knowledge-collection="${escapeHtml(collection.name)}"
+            aria-expanded="${expanded}" aria-controls="${contentId}">${expanded ? "Collapse" : "Expand"}</button>
+        </div>
+      </div>
+      <div class="knowledge-collection-content" id="${contentId}" ${expanded ? "" : "hidden"}>
+        <div class="knowledge-tag-row">${collection.top_tags.slice(0, 6).map((tag) => `<button type="button" data-knowledge-tag="${escapeHtml(tag)}">#${escapeHtml(tag)}</button>`).join("")}</div>
+        <div class="knowledge-document-list">
+          ${collection.visibleDocuments.map((document) => `
+            <details>
+              <summary><strong>${escapeHtml(document.title)}</strong><span>${document.word_count} words</span></summary>
+              <p>${escapeHtml(document.excerpt || "No readable preview")}</p>
+              ${(document.headings || []).length ? `<small>Sections · ${document.headings.map(escapeHtml).join(" · ")}</small>` : ""}
+            </details>
+          `).join("")}
+        </div>
       </div>
     </article>
-  `).join("") || '<div class="empty">No Markdown documents match this view</div>';
+  `;
+  }).join("") || '<div class="empty">No Markdown documents match this view</div>';
+  select("#knowledge-collections").querySelectorAll("[data-select-knowledge-collection]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) selectedKnowledgeCollections.add(input.dataset.selectKnowledgeCollection);
+      else selectedKnowledgeCollections.delete(input.dataset.selectKnowledgeCollection);
+      renderKnowledgeSelectionControls();
+      input.closest(".knowledge-collection").classList.toggle("retag-selected", input.checked);
+    });
+  });
   select("#knowledge-collections").querySelectorAll("[data-knowledge-collection]").forEach((button) => {
     button.addEventListener("click", () => {
-      knowledgeFocus = { type: "collection", value: button.dataset.knowledgeCollection };
+      const name = button.dataset.knowledgeCollection;
+      knowledgeFocus = knowledgeFocus?.type === "collection" && knowledgeFocus.value === name
+        ? null
+        : { type: "collection", value: name };
       renderKnowledge();
+    });
+  });
+  select("#knowledge-collections").querySelectorAll("[data-toggle-knowledge-collection]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const name = button.dataset.toggleKnowledgeCollection;
+      if (expandedKnowledgeCollections.has(name)) expandedKnowledgeCollections.delete(name);
+      else expandedKnowledgeCollections.add(name);
+      renderKnowledgeCollections();
     });
   });
   select("#knowledge-collections").querySelectorAll("[data-knowledge-tag]").forEach((button) => {
@@ -1885,7 +1948,9 @@ function renderKnowledgeGraph() {
 }
 
 function renderKnowledge() {
+  pruneKnowledgeCollectionState();
   renderKnowledgeStats();
+  renderKnowledgeSelectionControls();
   renderKnowledgeFilters();
   renderKnowledgeCollections();
   renderKnowledgeTree();
@@ -1895,22 +1960,38 @@ function renderKnowledge() {
 
 async function loadKnowledge(writeTags = false) {
   const button = select("#reindex-knowledge");
-  button.disabled = true;
+  const collections = [...selectedKnowledgeCollections];
+  if (writeTags && !collections.length) {
+    select("#knowledge-status").textContent = "Select at least one collection to generate tags.";
+    return;
+  }
+  knowledgeBusy = true;
+  button.textContent = writeTags ? "Generating tags…" : "Generate tags with LLM";
+  renderKnowledgeSelectionControls();
   select("#knowledge-status").textContent = writeTags ? "Generating replacement tags with the configured LLM…" : "Scanning local Markdown…";
   try {
-    knowledgeData = await requestJson(writeTags ? "/api/knowledge/reindex" : "/api/knowledge", {
-      method: writeTags ? "POST" : "GET",
-    });
+    knowledgeData = await requestJson(
+      writeTags ? "/api/knowledge/reindex" : "/api/knowledge",
+      writeTags
+        ? {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ collections }),
+        }
+        : { method: "GET" },
+    );
     renderKnowledge();
     const updated = knowledgeData.summary.updated;
     const failed = knowledgeData.summary.failed || 0;
     select("#knowledge-status").textContent = writeTags
-      ? `${updated} file(s) retagged by the LLM${failed ? `; ${failed} left unchanged after errors` : ""}.`
+      ? `${updated} file(s) retagged across ${knowledgeData.summary.selected_collections} selected collection(s)${failed ? `; ${failed} left unchanged after errors` : ""}.`
       : `Indexed ${knowledgeData.summary.documents} Markdown file(s).`;
   } catch (error) {
     select("#knowledge-status").textContent = error.message;
   } finally {
-    button.disabled = false;
+    knowledgeBusy = false;
+    button.textContent = "Generate tags with LLM";
+    renderKnowledgeSelectionControls();
   }
 }
 
@@ -2056,6 +2137,26 @@ select("#clear-knowledge-tag").addEventListener("click", () => {
   renderKnowledge();
 });
 select("#reindex-knowledge").addEventListener("click", () => loadKnowledge(true));
+select("#select-all-knowledge-collections").addEventListener("click", () => {
+  (knowledgeData?.collections || []).forEach((collection) => {
+    selectedKnowledgeCollections.add(collection.name);
+  });
+  renderKnowledge();
+});
+select("#clear-knowledge-collections").addEventListener("click", () => {
+  selectedKnowledgeCollections.clear();
+  renderKnowledge();
+});
+select("#expand-all-knowledge-collections").addEventListener("click", () => {
+  (knowledgeData?.collections || []).forEach((collection) => {
+    expandedKnowledgeCollections.add(collection.name);
+  });
+  renderKnowledgeCollections();
+});
+select("#collapse-all-knowledge-collections").addEventListener("click", () => {
+  expandedKnowledgeCollections.clear();
+  renderKnowledgeCollections();
+});
 select("#reset-knowledge-focus").addEventListener("click", () => {
   knowledgeFocus = null;
   renderKnowledge();
